@@ -23,7 +23,8 @@ class BootstrapTests(unittest.TestCase):
         curl.write_text('#!'+sys.executable+'\nimport os,pathlib,shutil,sys\nargs=sys.argv[1:]\nname=next(a.rsplit("/",1)[-1] for a in args if a.startswith("https://"))\nshutil.copyfile(pathlib.Path(os.environ["BOOTSTRAP_FIXTURES"])/name,args[args.index("-o")+1])\n')
         curl.chmod(0o755)
         self.env=dict(os.environ,HOME=str(self.folder),PATH=str(self.bin)+':'+os.environ['PATH'],BOOTSTRAP_FIXTURES=str(self.folder))
-        self.archive=self.folder/'vantaglass-0.1.tar.gz'
+        version=(ROOT/'VERSION').read_text().strip()
+        self.archive=self.folder/('vantaglass-'+version+'.tar.gz')
     def tearDown(self):self.tmp.cleanup()
     def prepare(self,bad_name=None,symlink=False):
         with tarfile.open(self.archive,'w:gz') as tf:
@@ -42,13 +43,17 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.folder/'installed').read_text(),'installed')
     def test_bad_checksum_never_runs_installer(self):
         self.prepare();self.checksum.write_text('0'*64+'  '+self.archive.name+'\n')
-        self.assertNotEqual(self.execute().returncode,0)
+        result=self.execute()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Release checksum mismatch',result.stderr)
         self.assertFalse((self.folder/'installed').exists())
     def test_unsafe_paths_and_links_never_run_installer(self):
         for name,link in [('vantaglass/../../outside',False),('/absolute',False),('vantaglass/link',True)]:
             with self.subTest(name=name):
                 self.prepare(name,link)
-                self.assertNotEqual(self.execute().returncode,0)
+                result=self.execute()
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn('Unsafe archive member',result.stderr)
                 self.assertFalse((self.folder/'installed').exists())
 
 if __name__=='__main__':unittest.main()
