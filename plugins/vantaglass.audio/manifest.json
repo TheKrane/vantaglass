@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "vantaglass.audio",
+  "name": "Audio \u00b7 Vantaglass",
+  "version": "0.1",
+  "author": "Omarchy / Vantaglass",
+  "description": "Volume slider, output picker, per-app mixer",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Audio",
+    "description": "Volume slider, output picker, per-app mixer",
+    "category": "Audio",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.audio"
+  }
+}

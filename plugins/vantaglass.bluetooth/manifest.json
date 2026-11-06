@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "vantaglass.bluetooth",
+  "name": "Bluetooth \u00b7 Vantaglass",
+  "version": "0.1",
+  "author": "Omarchy / Vantaglass",
+  "description": "Bluetooth device list with connect/disconnect",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Bluetooth",
+    "description": "Bluetooth device list with connect/disconnect",
+    "category": "Network",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.bluetooth"
+  }
+}

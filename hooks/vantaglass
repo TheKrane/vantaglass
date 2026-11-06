@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Vantaglass managed hook; no downloads, privileges, or theme changes.
+exec python "$HOME/.local/share/vantaglass/runtime/tools/manage.py" sync --hook

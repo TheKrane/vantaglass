@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "vantaglass.power",
+  "name": "Power \u00b7 Vantaglass",
+  "version": "0.1",
+  "author": "Omarchy / Vantaglass",
+  "description": "Battery, power profile, and system stats",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Power",
+    "description": "Battery, power profile, and system stats",
+    "category": "System",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.power"
+  }
+}

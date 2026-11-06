@@ -1,0 +1,27 @@
+{
+  "origin": "https://github.com/basecamp/omarchy",
+  "sha256_before_presentation_changes": {
+    "audio/Panel.qml": "f75564d2a8be05a18d832be926747b298401748d6e976a0c39f9053456439d09",
+    "audio/Model.js": "cac32aa2c2a2449223f64bfd935be360b4f61eb8112d4f62dc21270447eaee1b",
+    "monitor/Panel.qml": "b405184f103f1e82200a1aebe984f2c654804009af27cad58d056368e948afca",
+    "monitor/Model.js": "4374daa9cf57e7428dadfd7b0156ee8cef75b32a934ddd82b30dc4d0bf6d7c5c",
+    "network/Panel.qml": "8beba301a1d87db144543ad888226099c3dd1c2999f2a52106964b5851959adb",
+    "network/Model.js": "1562b0752495f693ef8231148f5e6d99c375d120852e9c312a2b47067aa9a8fa",
+    "bluetooth/Panel.qml": "1e03d3ae942f4fe095a57252d1f8253a4de269428bc5444b75ac30da84e1b269",
+    "bluetooth/Model.js": "b34f3259c6553f20ce37619d2f390cd3293303266f89f2a6df0b6810da384417",
+    "power/Panel.qml": "145cd9632d8caa3a9b390b27cb6e7382b2ccb83610ae4bda04a2755c52a75068",
+    "power/Model.js": "0a7f42b18dcdea6da54e02813f0fe9ff57e355f16e7a9caba1ba63913420ca43",
+    "Ui/KeyboardPanel.qml": "e8e0779598c9aaec0fb084a98c60178ab4fcfee87664a41e30f8e481684c4af9",
+    "menu/Menu.qml": "f76b25be69e80fbb139d29ca8e4bca8a98078f559d203750c3ced0f86f6d5f21",
+    "menu/MenuModel.js": "52178e52dddd6c553b4406c2a2a55122f3d55c632ef0075d923da84603e06caa",
+    "clock/BarWidget.qml": "e73f7a17f74ade40711dffa8262c1773b7bf74fd65a3047011317f588af9f3f6",
+    "clock/Panel.qml": "9eed7b315a07c61aeb57aa9ed7ae27b126eea91ecc66af0b5f49ce792ef56b7c",
+    "clock/Model.js": "8a2645eb75b22d4ee4b278e19b5092a91638f4b3af9a704999f7cd86d7f1091e",
+    "clock/WallClock.qml": "369c0c5313a56b9963e6b1853ebf9294b666c3ec9aa9fa819f3becb024a5261d",
+    "Ui/Button.qml": "93f156aaf109bd01a3daf2313d0d73b52177d24fc4fc8dd9fcae06c3402092bb",
+    "Ui/CursorSurface.qml": "f16939e750ae68c20afdeded78b074da4d8cdbea0a4e02c5cd99bf91c06e3458",
+    "Ui/PanelActionButton.qml": "299a6b758450b04047db9d119f3d3b508b4a692fa34779d10cfde519c7cb5275"
+  },
+  "scope": "Omarchy panels, menu, and shared controls adapted for Vantaglass. Original source hashes are retained for upstream review.",
+  "omarchy_package_version": "4.5.0-3"
+}

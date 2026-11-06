@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "vantaglass.clock",
+  "name": "Clock",
+  "version": "0.1",
+  "author": "Omarchy",
+  "description": "Date/time label with a calendar popup",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Clock",
+    "description": "Date/time label with a calendar popup",
+    "category": "Time",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.clock"
+  }
+}

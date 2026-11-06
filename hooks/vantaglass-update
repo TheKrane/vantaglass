@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Vantaglass managed hook: stable release updates after the user's Omarchy update.
+# User-local only; no privileged commands, background polling, or boot downloads.
+exec python "$HOME/.local/share/vantaglass/runtime/tools/manage.py" update --hook
