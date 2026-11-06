@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.style",
   "name": "Vantaglass style",
-  "version": "0.1",
+  "version": "0.1.1",
   "author": "Vantaglass contributors",
   "license": "MIT",
   "description": "Dark Vantaglass shared controls; system fonts are preserved and no bar button is added.",

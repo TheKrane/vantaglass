@@ -3,7 +3,7 @@
 set -euo pipefail
 main() {
   if (( EUID == 0 )); then echo 'Run as your normal desktop user, without sudo.' >&2; return 1; fi
-  local dependency release='0.1' repo='TheKrane/vantaglass'
+  local dependency release='0.1.1' repo='TheKrane/vantaglass'
   for dependency in curl python; do
     command -v "$dependency" >/dev/null || { echo "Missing dependency: $dependency" >&2; return 1; }
   done

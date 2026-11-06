@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.monitor",
   "name": "Display \u00b7 Vantaglass",
-  "version": "0.1",
+  "version": "0.1.1",
   "author": "Omarchy / Vantaglass",
   "description": "Brightness slider and laptop display controls",
   "kinds": [

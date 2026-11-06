@@ -19,7 +19,60 @@ def guest_command(output, env, label, *args, timeout=60):
     if result.returncode:raise RuntimeError(f'{label} failed ({result.returncode}); inspect its guest log')
     return result.stdout
 
-def installer_flow(output, env, config, baseline):
+def capture_preview(output, env, config):
+    """Capture a four-window desktop using only the disposable guest's files."""
+    config.write_text(config.read_text()+'\nhl.monitor({ output = "", mode = "2560x1440@60", position = "0x0", scale = 1 })\n')
+    guest_command(output,env,'preview-resolution','hyprctl','reload')
+    home=Path.home()
+    for name in ['Documents','Downloads','Music','Pictures','Projects','Videos']:
+        (home/name).mkdir(exist_ok=True)
+    project=home/'Projects/vantaglass'
+    from package import entries
+    for name,data in entries().items():
+        path=project/name
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes(data)
+    guest_command(output,env,'preview-icon-size','gsettings','set','org.gnome.nautilus.icon-view','default-zoom-level','extra-large')
+    btop=home/'.config/btop'
+    (btop/'themes').mkdir(parents=True,exist_ok=True)
+    shutil.copyfile(home/'.local/state/omarchy/current/theme/btop.theme',btop/'themes/vantaglass.theme')
+    (btop/'btop.conf').write_text('color_theme = "vantaglass"\ntheme_background = True\nshown_boxes = "cpu mem net proc"\n')
+    foot=['foot','--config',str(home/'.local/state/omarchy/current/theme/foot.ini'),'-o','main.font=JetBrainsMono Nerd Font:size=13']
+    commands=[
+        ('preview-editor',foot+['--app-id','preview-editor','nvim','-u','NONE','-i','NONE','-n','+set number termguicolors','+syntax on','+highlight Normal guibg=#000000 guifg=#ffffff','+130',str(project/'tools/manage.py')]),
+        ('preview-monitor',foot+['--app-id','preview-monitor','btop']),
+        ('preview-terminal',foot+['--app-id','preview-terminal','bash','--noprofile','--norc','-c','cd "$HOME/Projects/vantaglass"; ls -lah --color=always; printf "\\n"; exec bash --noprofile --norc']),
+        ('org.gnome.Nautilus',['nautilus','--new-window',str(home)]),
+    ]
+    positions=[(16,48),(1290,48),(16,750),(1290,750)]
+    processes=[]
+    log=(output/'preview-apps.log').open('w')
+    try:
+        for (app,args),(x,y) in zip(commands,positions):
+            processes.append(subprocess.Popen(args,env=dict(env,GTK_THEME='Adwaita:dark'),stdout=log,stderr=log))
+            for _ in range(80):
+                clients=json.loads(guest_command(output,env,'preview-clients','hyprctl','-j','clients'))
+                client=next((c for c in clients if c['class']==app),None)
+                if client:break
+                time.sleep(.1)
+            else:raise RuntimeError('Preview application did not map: '+app)
+            window='"address:'+client['address']+'"'
+            for action in ['float({action="on",window='+window+'})',
+                           'resize({x=1254,y=670,relative=false,window='+window+'})',
+                           'move({x='+str(x)+',y='+str(y)+',relative=false,window='+window+'})']:
+                guest_command(output,env,'preview-arrange','hyprctl','dispatch','hl.dsp.window.'+action)
+        time.sleep(2)
+        guest_command(output,env,'preview-capture','grim',str(output/'preview.png'))
+        return {'preview':'preview.png','applications':[app for app,_ in commands]}
+    finally:
+        for process in processes:
+            if process.poll() is None:process.terminate()
+        for process in processes:
+            try:process.wait(timeout=3)
+            except subprocess.TimeoutExpired:process.kill();process.wait()
+        log.close()
+
+def installer_flow(output, env, config, baseline, preview=False):
     """Run real commands against the guest compositor and shell, without mocks."""
     home=Path.home()
     env=dict(env,PATH=str(home/'.local/bin')+':/usr/bin:/bin',OMARCHY_PATH='/usr/share/omarchy',QT_QPA_PLATFORM='wayland',QT_QUICK_BACKEND='software',QT_FORCE_STDERR_LOGGING='1',OMARCHY_SHELL_IPC_TIMEOUT='5s',QS_DISABLE_FILE_WATCHER='1',QS_NO_RELOAD_POPUP='1')
@@ -78,6 +131,9 @@ def installer_flow(output, env, config, baseline):
         if json.loads(shell_file.read_text())['bar']['layout']!=shell_config['bar']['layout']:raise RuntimeError('Inactive installation changed the original layout')
         guest_command(output,env,'reinstall',*manager,'install')
         if json.loads((state/'installation.json').read_text())!=manifest:raise RuntimeError('Reinstall replaced the original snapshot')
+        if preview:
+            guest_command(output,env,'preview-switch',*manager,'switch')
+            return capture_preview(output,env,config)
         results=[]
         for theme in ['vantaglass']:
             tag=theme
@@ -313,7 +369,7 @@ echo "VANTAGLASS_VM_FINISHED:$?"
     (root/'init').write_text(init)
     (root/'init').chmod(0o755)
 
-def inside(integration=False):
+def inside(integration=False, preview=False):
     if os.environ.get('VANTAGLASS_VM')!='1' or 'vantaglass_vm=1' not in Path('/proc/cmdline').read_text():
         raise RuntimeError('VM-only entry point; refusing to run on host')
     output=Path('/output')
@@ -356,7 +412,7 @@ def inside(integration=False):
                         if rounding!=expected or blur!=(appearance!='baseline'):raise RuntimeError('Guest theme geometry did not apply')
                         results.append({'appearance':appearance,'rounding':rounding,'blur':blur,'configerrors':errors})
                         print('Verified guest reload: '+appearance,flush=True)
-                    installation=installer_flow(output,env,config,baseline) if integration else None
+                    installation=installer_flow(output,env,config,baseline,preview) if integration or preview else None
                     exit_response=subprocess.run(['hyprctl','dispatch','hl.dsp.exit()'],env=env,capture_output=True,text=True,timeout=3)
                     print('Exit response:',exit_response.returncode,exit_response.stdout,exit_response.stderr,flush=True)
                     returncode=process.wait(timeout=5)
@@ -380,9 +436,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside',action='store_true')
     parser.add_argument('--integration',action='store_true')
+    parser.add_argument('--preview',action='store_true',help='Capture a theme-switcher preview in the guest')
     args=parser.parse_args()
-    if args.inside:return inside(args.integration)
-    output=ROOT/('validation/vm-integration' if args.integration else 'validation/vm-sandbox')
+    if args.inside:return inside(args.integration,args.preview)
+    output=ROOT/('validation/vm-preview' if args.preview else ('validation/vm-integration' if args.integration else 'validation/vm-sandbox'))
     output.mkdir(parents=True,exist_ok=True)
     (output/'probe-report.json').unlink(missing_ok=True)
     kernels=sorted(p.parent for p in Path('/usr/lib/modules').glob('*/vmlinuz') if p.is_file())
@@ -392,7 +449,7 @@ def main():
         temporary=Path(temporary)
         root=temporary/'root';root.mkdir()
         initramfs(root,kernel)
-        init=root/'init';init.write_text(init.read_text().replace('VM_MODE','--integration' if args.integration else ''))
+        init=root/'init';init.write_text(init.read_text().replace('VM_MODE','--preview' if args.preview else ('--integration' if args.integration else '')))
         paths=b'\0'.join(str(p.relative_to(root)).encode() for p in sorted(root.rglob('*')))+b'\0'
         archive=subprocess.run(['cpio','--null','-o','-H','newc','--quiet','--owner=0:0'],cwd=root,input=paths,capture_output=True,check=True,timeout=20).stdout
         ramdisk=temporary/'initramfs.cpio.gz';ramdisk.write_bytes(gzip.compress(archive,mtime=0))
@@ -400,7 +457,7 @@ def main():
         for name,path,readonly in [('usr',Path('/usr'),True),('project',ROOT,True),('output',output,False)]:
             cmd+=['-fsdev',f'local,id={name},path={path},security_model=none'+(',readonly=on' if readonly else ''),'-device',f'virtio-9p-pci,fsdev={name},mount_tag={name}']
         with (output/'console.log').open('w') as console:
-            subprocess.run(cmd,stdout=console,stderr=subprocess.STDOUT,timeout=240 if args.integration else 75,check=True,env={k:v for k,v in os.environ.items() if k not in ['DISPLAY','WAYLAND_DISPLAY','HYPRLAND_INSTANCE_SIGNATURE']})
+            subprocess.run(cmd,stdout=console,stderr=subprocess.STDOUT,timeout=240 if args.integration or args.preview else 75,check=True,env={k:v for k,v in os.environ.items() if k not in ['DISPLAY','WAYLAND_DISPLAY','HYPRLAND_INSTANCE_SIGNATURE']})
     if not (output/'probe-report.json').exists():raise RuntimeError('VM probe failed; inspect validation/vm-sandbox logs')
     if 'VANTAGLASS_VM_FINISHED:0' not in (output/'console.log').read_text():raise RuntimeError('Guest validation failed; inspect guest.log')
     print('Disposable virtual-GPU Hyprland lifecycle probe passed.')

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.menu",
   "name": "Omarchy menu \u00b7 Vantaglass",
-  "version": "0.1",
+  "version": "0.1.1",
   "author": "Vantaglass",
   "description": "Native-size Omarchy command menu with Vantaglass glass and popup geometry.",
   "kinds": [
