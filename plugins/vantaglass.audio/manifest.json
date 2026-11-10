@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.audio",
   "name": "Audio \u00b7 Vantaglass",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Omarchy / Vantaglass",
   "description": "Volume slider, output picker, per-app mixer",
   "kinds": [

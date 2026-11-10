@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
+import configparser
 from build import PALETTES, ROOT
 
 def rgb(color):
@@ -24,6 +25,13 @@ def validate(live=False):
     assert set(PALETTES) == {'vantaglass'}, 'Only the dark theme is supported'
     for appearance,p in PALETTES.items():
         folder = ROOT/'themes'/'vantaglass'
+        terminal=configparser.ConfigParser(interpolation=None)
+        terminal.read(folder/'foot.ini')
+        assert terminal['colors-dark']['background']=='000000'
+        assert terminal['colors-dark'].getfloat('alpha')==.70
+        assert terminal['colors-dark']['alpha-mode']=='matching'
+        assert terminal['colors-dark'].getboolean('blur')
+        assert not any(key.startswith('font') for key in terminal['main'])
         palette = tomllib.loads((folder/'colors.toml').read_text())
         assert palette['mode'] == 'dark'
         for key,value in p.items(): assert palette[key] == value, ('palette drift',key)

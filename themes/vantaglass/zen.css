@@ -1,0 +1,78 @@
+/* Vantaglass for Zen Browser. Load from the profile's userChrome.css. */
+@-moz-document url("chrome://browser/content/browser.xhtml") {
+  :root {
+    --vg-glass: rgb(0 0 0 / 70%);
+    --vg-edge: rgb(255 255 255 / 12%);
+    --vg-highlight: rgb(255 255 255 / 30%);
+    --vg-hover: rgb(255 255 255 / 7.5%);
+    --vg-selected: rgb(255 255 255 / 12%);
+    --vg-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+    --vg-panel-radius: 22px;
+
+    --zen-main-browser-background: #000 !important;
+    --zen-main-browser-background-old: #000 !important;
+    --zen-main-browser-background-toolbar: #000 !important;
+    --zen-main-browser-background-toolbar-old: #000 !important;
+    --zen-primary-color: #8d8d8d !important;
+    --toolbar-color: #fff !important;
+    --toolbar-field-color: #fff !important;
+    --toolbar-field-focus-color: #fff !important;
+    --toolbarbutton-border-radius: 999px !important;
+    --toolbarbutton-hover-background: var(--vg-hover) !important;
+    --toolbarbutton-background-color-hover: var(--vg-hover) !important;
+    --toolbarbutton-active-background: var(--vg-selected) !important;
+    --tab-border-radius: 12px !important;
+    --tab-background-color-hover: var(--vg-hover) !important;
+    --tab-background-color-selected: var(--vg-selected) !important;
+    --tab-selected-outline-color: var(--vg-edge) !important;
+    --arrowpanel-menuitem-border-radius: 10px !important;
+    --toolbar-field-border-color-focus: #8d8d8d !important;
+  }
+
+  /* Popups use their native content box so the outside remains transparent. */
+  :is(panel, menupopup) {
+    --arrowpanel-background: var(--vg-glass) !important;
+    --arrowpanel-color: #fff !important;
+    --panel-background-color: var(--vg-glass) !important;
+    --panel-color: #fff !important;
+    --panel-border-color: var(--vg-edge) !important;
+    --panel-border-radius: var(--vg-panel-radius) !important;
+    --panel-separator-color: var(--vg-edge) !important;
+    --panel-item-hover-bgcolor: var(--vg-hover) !important;
+    --panel-item-active-bgcolor: var(--vg-selected) !important;
+    --panel-box-shadow: var(--vg-shadow) !important;
+  }
+
+  :is(panel, menupopup)::part(content) {
+    border-radius: var(--vg-panel-radius) !important;
+    border-top-color: var(--vg-highlight) !important;
+    border-bottom-color: rgb(255 255 255 / 6%) !important;
+  }
+
+  #urlbar[breakout-extend],
+  #urlbar[breakout-extend] > .urlbar-background {
+    border-radius: var(--vg-panel-radius) !important;
+  }
+
+  #urlbar[breakout-extend] > .urlbar-background {
+    background-color: var(--vg-glass) !important;
+    backdrop-filter: blur(24px) !important;
+    border: 1px solid var(--vg-edge) !important;
+    border-top-color: var(--vg-highlight) !important;
+    border-bottom-color: rgb(255 255 255 / 6%) !important;
+    outline: none !important;
+    box-shadow: var(--vg-shadow) !important;
+  }
+
+  #urlbar[breakout-extend] .urlbarView-row-inner {
+    border-radius: 10px !important;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    :root { --vg-glass: #090909; }
+
+    #urlbar[breakout-extend] > .urlbar-background {
+      backdrop-filter: none !important;
+    }
+  }
+}

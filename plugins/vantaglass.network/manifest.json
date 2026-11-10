@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.network",
   "name": "Network \u00b7 Vantaglass",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Omarchy / Vantaglass",
   "description": "Wi-Fi list and connection state",
   "kinds": [

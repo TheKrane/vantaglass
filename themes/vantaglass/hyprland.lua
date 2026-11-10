@@ -11,3 +11,16 @@ hl.config({
 for _, ns in ipairs({ "^omarchy-bar$", "^omarchy-menu$", "^omarchy-notifications$", "^omarchy-keyboard-panel$" }) do
   hl.layer_rule({ match = { namespace = ns }, blur = true, ignore_alpha = 0.35 })
 end
+-- Window rules retain the terminal silhouette when personal defaults differ.
+-- Only the background is translucent; compositor opacity would also fade text.
+hl.window_rule({
+  match = { tag = "terminal" },
+  rounding = 18, rounding_power = 2.0, border_size = 1,
+  opacity = "1.0 override 1.0 override",
+  no_blur = false, no_shadow = false,
+  border_color = { colors = { "rgba(ffffff26)", "rgba(ffffff08)" }, angle = 110 },
+})
+hl.window_rule({
+  match = { tag = "terminal", focus = true },
+  border_color = { colors = { "rgba(ffffff52)", "rgba(ffffff0d)" }, angle = 110 },
+})

@@ -154,7 +154,7 @@ def installer_flow(output, env, config, baseline, preview=False):
             if policy['BrowserThemeColor'].lower()!=expected_browser.lower():raise RuntimeError('Guest browser policy did not receive the theme')
             if terminal is None:
                 terminal_log=(output/'terminal.log').open('w')
-                program='import time; print("\\033[1mOmarchy\\033[0m\\nA clear view of your work.\\n\\n\\033[32m✓\\033[0m Theme verification\\n\\033[34m●\\033[0m Native desktop controls\\n\\033[33m●\\033[0m Keyboard workflows preserved",flush=True); time.sleep(300)'
+                program='import time; print("\\033[97m████████\\033[0m\\n\\033[48;2;0;0;0m"+" "*80+"\\033[0m\\n\\033[1mOmarchy\\033[0m\\nA clear view of your work.\\n\\n\\033[32m✓\\033[0m Theme verification\\n\\033[34m●\\033[0m Native desktop controls\\n\\033[33m●\\033[0m Keyboard workflows preserved",flush=True); time.sleep(300)'
                 terminal=subprocess.Popen(['foot','--config',str(generated/'foot.ini'),'--app-id','vantaglass-validation','--title','Omarchy · Theme verification','python','-c',program],env=env,stdout=terminal_log,stderr=terminal_log)
             for _ in range(30):
                 if terminal.poll() is not None:raise RuntimeError('Guest terminal exited; inspect terminal.log')
@@ -163,19 +163,40 @@ def installer_flow(output, env, config, baseline, preview=False):
                 if window:break
                 time.sleep(.1)
             else:raise RuntimeError('Guest terminal did not map')
+            address='address:'+window['address']
+            # Terminal rules must survive a user's different global geometry.
+            guest_command(output,env,'personal-rounding','hyprctl','repl','hl.config({decoration={rounding=10}})')
+            rounding=guest_command(output,env,'terminal-rounding','hyprctl','getprop',address,'rounding').strip()
+            if rounding!='18':raise RuntimeError('Terminal did not retain theme-local rounding: '+rounding)
+            guest_command(output,env,'restore-rounding','hyprctl','repl','hl.config({decoration={rounding=18}})')
+            border=guest_command(output,env,'terminal-border','hyprctl','getprop',address,'active_border_color')
+            angle=re.search(r'(\d+)deg',border)
+            if not angle or abs(int(angle[1])-110)>3 or len(border.split())!=3:
+                raise RuntimeError('Terminal edge gradient did not apply: '+border)
+            # A white backdrop makes 70% black measurable independently of the
+            # bundled photograph; the first line also verifies opaque glyphs.
+            backdrop=home/'white.png'
+            preserved_wallpaper=str(wallpaper.resolve())
+            guest_command(output,env,'white-backdrop','magick','-size','1280x800','xc:white',str(backdrop))
+            guest_command(output,env,'test-backdrop','omarchy','theme','bg','set',str(backdrop))
             time.sleep(.7)
             app_image=output/(tag+'-application.png')
             x=window['at'][0]+window['size'][0]-30;y=window['at'][1]+window['size'][1]-30
             expression=','.join(f'%[fx:round(255*p{{{x},{y}}}.{channel})]' for channel in ['r','g','b'])
             expected=palette['background'].lstrip('#')
-            expected_rgb=[int(expected[i:i+2],16) for i in [0,2,4]]
+            expected_rgb=[77,77,77]
             for _ in range(12):
                 guest_command(output,env,tag+'-application-capture','grim','-o','Virtual-1',str(app_image))
                 sample=guest_command(output,env,tag+'-application-color','magick',str(app_image),'-format',expression,'info:').strip()
                 actual_rgb=[int(value) for value in sample.split(',')]
-                if all(abs(a-b)<=2 for a,b in zip(actual_rgb,expected_rgb)):break
+                if all(abs(a-b)<=3 for a,b in zip(actual_rgb,expected_rgb)):break
                 time.sleep(.2)
             else:raise RuntimeError('Live terminal background did not match theme: '+sample+' vs '+expected)
+            pixels=guest_command(output,env,'terminal-glyphs','magick',str(app_image),'-crop',f'160x50+{window["at"][0]+18}+{window["at"][1]+18}','-format','%[fx:maxima]','info:')
+            if float(pixels)<.999:raise RuntimeError('Terminal text was faded with its background')
+            explicit=guest_command(output,env,'terminal-explicit-black','magick',str(app_image),'-format',f'%[fx:round(255*p{{{window["at"][0]+80},{window["at"][1]+40}}}.r)]','info:')
+            if abs(int(explicit)-77)>3:raise RuntimeError('Explicit black cells lost transparency: '+explicit)
+            guest_command(output,env,'restore-backdrop','omarchy','theme','bg','set',preserved_wallpaper)
             guest_command(output,env,tag+'-menu-ipc','omarchy-shell','shell','summon','omarchy.menu','{"menu":"root"}')
             time.sleep(.7)
             guest_command(output,env,tag+'-menu-capture','grim','-o','Virtual-1',str(output/(tag+'-menu.png')))
@@ -183,7 +204,7 @@ def installer_flow(output, env, config, baseline, preview=False):
             guest_command(output,env,tag+'-notification','notify-send','-a','Omarchy','-t','800','Vantaglass','A clear view of your work.')
             time.sleep(.3)
             guest_command(output,env,tag+'-notification-capture','grim','-o','Virtual-1',str(output/(tag+'-notification.png')))
-            results.append({'theme':theme,'active_theme':active,'rounding':geometry['int'],'live_terminal_background':actual_rgb,'expected_terminal_background':expected_rgb,'browser_policy_color':policy['BrowserThemeColor'],'shell_renderer':'software'})
+            results.append({'theme':theme,'active_theme':active,'rounding':geometry['int'],'live_terminal_background':actual_rgb,'expected_terminal_background':expected_rgb,'terminal_text':'opaque','explicit_black_cells':'translucent','terminal_rounding':int(rounding),'terminal_edge':border.strip(),'browser_policy_color':policy['BrowserThemeColor'],'shell_renderer':'software'})
             print('Verified real guest switch: '+tag,flush=True)
         # Fixture transport only: real post-update hook, downloader validation,
         # installer, operation locks and shell refresh all run unchanged.
@@ -197,6 +218,10 @@ def installer_flow(output, env, config, baseline, preview=False):
         # Ordinary Omarchy commands, not our switch command, drive the overlay.
         for iteration in range(2):
             guest_command(output,dict(env,OMARCHY_THEME_WAIT='1'),'native-away-'+str(iteration),'omarchy','theme','set','vm-original')
+            if guest_command(output,env,'native-terminal-rounding','hyprctl','getprop',address,'rounding').strip()!='0':
+                raise RuntimeError('Terminal rules remained after switching away')
+            if 'alpha=0.70' in (home/'.local/state/omarchy/current/theme/foot.ini').read_text():
+                raise RuntimeError('Terminal glass remained in the other theme')
             if json.loads(shell_file.read_text())['bar']['layout']!=shell_config['bar']['layout']:raise RuntimeError('Ordinary switch-away retained custom widgets')
             guest_command(output,dict(env,OMARCHY_THEME_WAIT='1'),'native-back-'+str(iteration),'omarchy','theme','set','vantaglass')
             if json.loads(shell_file.read_text())['bar']['layout']!=expected_layout:raise RuntimeError('Ordinary switch-back did not restore custom widgets')
@@ -384,6 +409,9 @@ def inside(integration=False, preview=False):
     config=Path.home()/'.config/hypr/hyprland.lua'
     config.parent.mkdir(parents=True,exist_ok=True)
     baseline='hl.config({ debug = { enable_stdout_logs = true, disable_logs = false }, misc = { disable_hyprland_logo = true, disable_splash_rendering = true }, decoration = { rounding = 0, blur = { enabled = false } } })\n'
+    # The minimal guest omits Omarchy's defaults; supply its terminal tagging
+    # and opacity rules so the theme is checked against the normal baseline.
+    baseline+='hl.window_rule({match={class="(foot|preview-.*|vantaglass-validation)"},tag="+terminal",opacity="0.985 0.96"})\n'
     config.write_text(baseline)
     log=(output/'hyprland.log').open('w')
     process=subprocess.Popen(['/usr/bin/Hyprland','--config',str(config)],stdout=log,stderr=log)

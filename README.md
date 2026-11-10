@@ -24,6 +24,18 @@ omarchy theme set vantaglass
 
 Switching to another theme restores the native panels. Switching back enables Vantaglass again.
 
+## Optional overrides
+
+**Zen Browser.** Open the profile folder from `about:support`. Copy [zen.css](themes/vantaglass/zen.css) into its `chrome` directory and add this line at the top of `chrome/userChrome.css`:
+
+```css
+@import url("zen.css");
+```
+
+In `about:config`, enable `toolkit.legacyUserProfileCustomizations.stylesheets` and `zen.theme.acrylic-urlbar`, then fully quit and reopen Zen. The override styles browser menus and the address popup. The popup uses backdrop blur on Zen builds that support it.
+
+**Single tiled window.** Copy [single-window.lua](assets/single-window.lua) into `~/.config/hypr/`, then add `require("hypr.single-window")` at the end of `~/.config/hypr/hyprland.lua` and run `hyprctl reload`. A lone tiled window in dwindle uses 75% of the available width and height, centered. Floating windows are excluded from the count.
+
 ## Updates
 
 Vantaglass checks for updates when you run an Omarchy update, including through the top-bar update button. It uses Omarchy's supported `post-update` hook.

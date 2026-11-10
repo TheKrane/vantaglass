@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vantaglass.clock",
   "name": "Clock",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Omarchy",
   "description": "Date/time label with a calendar popup",
   "kinds": [
