@@ -295,6 +295,14 @@ Item {
   // when/checked answer, so re-running the guard batch would be pure waste.
   function rebuildItemsFromSources(skipGuards) {
     var translatedDefaults = MenuModel.applyTranslations(root.defaultMenuItems, root.menuCatalog)
+    translatedDefaults = translatedDefaults.concat(MenuModel.parseMenuJsonc(JSON.stringify({
+      "appearance.entertainment": {
+        label: qsTr("Entertainment Mode"),
+        icon: "󰊴",
+        description: qsTr("Toggle the entertainment dashboard on this workspace"),
+        action: "~/.local/bin/vantaglass entertainment toggle"
+      }
+    })))
     // The root row is injected by the merge (it has no JSONC entry), so its
     // "Go" label comes from the catalog's root entry; the merge only uses
     // it for the injected row, never over a user-supplied heading.

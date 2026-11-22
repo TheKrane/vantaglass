@@ -154,7 +154,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_installed_launcher_survives_missing_source_checkout(self):
         incoming=self.home/'source'
-        for folder in ['tools','themes','plugins','licenses','hooks']:
+        for folder in ['tools','themes','plugins','licenses','hooks','entertainment']:
             shutil.copytree(ROOT/folder,incoming/folder)
         for name in ['LICENSE','ATTRIBUTION.md','VERSION','compatibility.json']:
             shutil.copyfile(ROOT/name,incoming/name)

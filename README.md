@@ -24,6 +24,23 @@ omarchy theme set vantaglass
 
 Switching to another theme restores the native panels. Switching back enables Vantaglass again.
 
+## Entertainment mode
+
+On the workspace you want to use, open **Appearance → Entertainment Mode**. The dashboard shows installed apps and previews of windows on that workspace. Selecting an app opens it. Selecting a running window makes it fullscreen.
+
+| Action | Keyboard | Controller | TV remote |
+| --- | --- | --- | --- |
+| Move | Arrow keys | D-pad or left stick | Direction buttons |
+| Open or resume | Enter | A | OK |
+| Close a window | Delete, then Enter | X, then A | Menu, then OK |
+| Go back | Esc | B | Back |
+| Exit entertainment mode | F10 | Start | Exit |
+| Return from fullscreen | `vantaglass entertainment show` | Guide | Home with the setup below |
+
+Controllers use SDL2 (`sdl2-compat` on Arch). Remotes that send keyboard events work while the dashboard has focus. For a remote that Linux exposes under `/dev/input/by-id/`, set `VANTAGLASS_REMOTE_DEVICE` in your session environment to its event device path to also use Home from fullscreen. The session user needs read access to that device. HDMI-CEC remotes need a bridge that sends Linux input events.
+
+You can also toggle the current workspace with `~/.local/bin/vantaglass entertainment toggle`. The workspace setting survives a reboot.
+
 ## Optional overrides
 
 **Zen Browser.** Open the profile folder from `about:support`. Copy [zen.css](themes/vantaglass/zen.css) into its `chrome` directory and add this line at the top of `chrome/userChrome.css`:

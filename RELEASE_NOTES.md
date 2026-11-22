@@ -1,5 +1,3 @@
-- Match Foot terminals to Vantaglass menus with a 70% black background, opaque text, rounded corners, and a subtle edge highlight. Refresh the theme picker screenshot.
-- Add an optional Zen Browser stylesheet for matching menus and a blurred address popup.
-- Include an optional dwindle layout rule that centers a lone tile at 75% width and height and ignores floating windows.
+Vantaglass adds Entertainment Mode, a full-screen app launcher you can enable per workspace. Running windows show live previews. Select a window to go fullscreen, or close it from the dashboard.
 
-See the README for setup instructions for the optional overrides.
+Open **Appearance → Entertainment Mode** to get started. The dashboard works with a keyboard, SDL-compatible controllers, and TV remotes that Linux exposes as input devices. See the [README](https://github.com/TheKrane/vantaglass#entertainment-mode) for controls and remote setup.

@@ -21,7 +21,7 @@ jobs:
       - name: Check installer and management tests
         run: |
           bash -n install.sh bootstrap.sh hooks/vantaglass hooks/vantaglass-update
-          python3 -m compileall -q tools tests
+          python3 -m compileall -q tools tests entertainment
           python3 -m unittest discover -s tests -v
       - name: Build verified source archive
         run: python3 tools/package.py

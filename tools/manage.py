@@ -86,6 +86,7 @@ def install_runtime():
         shutil.copytree(ROOT/'themes', staged/'themes')
         shutil.copytree(ROOT/'plugins', staged/'plugins')
         shutil.copytree(ROOT/'licenses', staged/'licenses')
+        shutil.copytree(ROOT/'entertainment', staged/'entertainment', ignore=shutil.ignore_patterns('__pycache__'))
         for name in ['LICENSE', 'ATTRIBUTION.md', 'VERSION', 'compatibility.json']:
             shutil.copyfile(ROOT/name, staged/name)
         (staged/'.vantaglass-managed').write_text('Vantaglass managed runtime\n')
@@ -347,6 +348,12 @@ def uninstall():
     for path in hook_paths():
         if path.is_file() and 'Vantaglass managed hook' in path.read_text():
             shutil.copy2(path,destination/(path.parent.name+'-hook'));path.unlink()
+    dashboard = runtime_path()/'entertainment/shell.qml'
+    if dashboard.is_file():
+        try:
+            subprocess.run(['qs', 'kill', '-p', str(dashboard)], capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            print('Could not stop the entertainment dashboard: '+str(error), file=sys.stderr)
     restore()
     owned = [CONFIG/'omarchy/plugins'/name for name in [PLUGIN,MENU,*PANELS]]
     owned += [CONFIG/'omarchy/themes/vantaglass']
@@ -357,6 +364,9 @@ def uninstall():
     if launcher.exists() and 'Vantaglass managed launcher' in launcher.read_text(): launcher.unlink()
     for name in ['installation.json','preferences.json','original-shell.json']:
         if (STATE/name).exists(): shutil.move(str(STATE/name),str(destination/name))
+    entertainment_state = Path(os.environ.get('XDG_STATE_HOME') or HOME/'.local/state')/'vantaglass/entertainment.json'
+    if entertainment_state.is_file():
+        shutil.move(str(entertainment_state), str(destination/'entertainment.json'))
     run('omarchy-shell','shell','rescanPlugins')
     print('Uninstalled. Preserved files:',destination)
 
@@ -392,6 +402,10 @@ def update(hook=False):
         print('Vantaglass update skipped: '+str(error)+'. Omarchy update can continue.',file=sys.stderr)
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'entertainment':
+        helper = ROOT/'entertainment/mode.py'
+        result = subprocess.run([sys.executable, str(helper), *(sys.argv[2:] or ['show'])])
+        raise SystemExit(result.returncode)
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('install')
@@ -403,6 +417,7 @@ def main():
     commands.add_parser('uninstall')
     commands.add_parser('status')
     commands.add_parser('doctor')
+    commands.add_parser('entertainment', help='Manage the entertainment dashboard')
     sync_parser = commands.add_parser('sync')
     sync_parser.add_argument('--hook',action='store_true')
     args = parser.parse_args()
@@ -425,6 +440,8 @@ def main():
 
 if __name__ == '__main__':
     try:
+        if sys.argv[1:2] == ['entertainment']:
+            main()
         STATE.mkdir(parents=True,exist_ok=True)
         with (STATE/('update.lock' if len(sys.argv)>1 and sys.argv[1]=='update' else 'operation.lock')).open('w') as lock:
             try:

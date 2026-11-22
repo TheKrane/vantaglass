@@ -12,7 +12,7 @@ def entries():
     files=[]
     for name in ['README.md','CONTRIBUTING.md','RELEASE_NOTES.md','ATTRIBUTION.md','LICENSE','VERSION','compatibility.json','install.sh','bootstrap.sh']:
         files.append(ROOT/name)
-    for folder in ['themes','plugins','assets','licenses','tools','tests','hooks']:
+    for folder in ['themes','plugins','assets','licenses','tools','tests','hooks','entertainment']:
         for path in (ROOT/folder).rglob('*'):
             if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts and path.suffix!='.pyc':files.append(path)
     return {str(path.relative_to(ROOT)):path.read_bytes() for path in sorted(files)}

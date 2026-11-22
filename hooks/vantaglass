@@ -1,3 +1,12 @@
 #!/usr/bin/env bash
 # Vantaglass managed hook; no downloads, privileges, or theme changes.
-exec python "$HOME/.local/share/vantaglass/runtime/tools/manage.py" sync --hook
+manager="$HOME/.local/share/vantaglass/runtime/tools/manage.py"
+case "$0" in
+    */post-boot.d/*)
+        python "$manager" sync --hook
+        exec python "$manager" entertainment start
+        ;;
+    *)
+        exec python "$manager" sync --hook
+        ;;
+esac

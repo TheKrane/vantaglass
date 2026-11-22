@@ -72,6 +72,112 @@ def capture_preview(output, env, config):
             except subprocess.TimeoutExpired:process.kill();process.wait()
         log.close()
 
+def check_entertainment(output, env, home):
+    dashboard = home/'.local/share/vantaglass/runtime/entertainment/shell.qml'
+    manager = [str(home/'.local/bin/vantaglass'), 'entertainment']
+
+    def cmd(*args):
+        return subprocess.check_output(args, env=env, text=True, timeout=8).strip()
+
+    def wait_for(predicate, message):
+        for _ in range(70):
+            if predicate():
+                print(message, flush=True)
+                return
+            time.sleep(.1)
+        raise RuntimeError(message)
+
+    def visible():
+        layers = json.loads(cmd('hyprctl', '-j', 'layers'))
+        return any(layer['namespace'] == 'vantaglass-entertainment'
+                   for monitor in layers.values() for level in monitor['levels'].values() for layer in level)
+
+    def window(app='entertainment-probe'):
+        return next((client for client in json.loads(cmd('hyprctl', '-j', 'clients'))
+                     if client['class'] == app), {})
+
+    def remote(action):
+        cmd('qs', 'ipc', '-p', str(dashboard), 'call', 'entertainment', 'input', action)
+
+    apps = home/'.local/share/applications'
+    apps.mkdir(parents=True, exist_ok=True)
+    (apps/'entertainment-probe.desktop').write_text(
+        '[Desktop Entry]\nType=Application\nName=000 Preview test\nStartupWMClass=entertainment-probe\n'
+        'Exec=foot --app-id=entertainment-probe --title=Preview-test -o colors-dark.background=941d35 sleep 120\n'
+    )
+    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="31"})')
+    cmd('omarchy-shell', 'shell', 'summon', 'omarchy.menu', '{"menu":"appearance.entertainment"}')
+    wait_for(visible, 'Omarchy menu opened the installed dashboard on workspace 31')
+    cmd('wtype', '-k', 'Return')
+    wait_for(lambda: window().get('fullscreen') == 2 and not visible(), 'Launching an app fullscreen from the dashboard works')
+    cmd(*manager, 'show')
+    wait_for(visible, 'Installed command recovered the dashboard from fullscreen')
+    image = output/'entertainment-running.png'
+
+    def preview_colors():
+        cmd('grim', str(image))
+        return cmd('magick', str(image), '-format', '%c', 'histogram:info:')
+
+    def both_cards():
+        colors = preview_colors()
+        return '#941D35' in colors and '#145875' in colors
+
+    def first_card():
+        colors = preview_colors()
+        return '#941D35' in colors and '#145875' not in colors
+
+    wait_for(first_card, 'Running window card contains pixels from the test application')
+    cmd('wtype', '-k', 'Up', '-k', 'Return')
+    wait_for(lambda: window().get('fullscreen') == 2 and not visible(), 'Selecting a running window returns it to fullscreen')
+    remote('home')
+    wait_for(visible, 'Remote Home action returns to the dashboard')
+    second = subprocess.Popen(['foot', '--app-id=entertainment-second', '--title=Second', '-o',
+                               'colors-dark.background=145875', 'sleep', '120'], env=env)
+    try:
+        wait_for(both_cards, 'Both cards render live window previews')
+        cmd(*manager, 'fullscreen', '31', window()['address'])
+        remote('right')
+        remote('select')
+        wait_for(lambda: window('entertainment-second').get('fullscreen') == 2 and not visible(),
+                 'Fullscreen transfers to the selected window')
+        remote('home')
+        wait_for(visible, 'Dashboard returned above the second window')
+        remote('close')
+        remote('select')
+        wait_for(lambda: not window('entertainment-second'), 'Closing a card preserves the other window')
+        if not window(): raise RuntimeError('Closing a card also closed the other window')
+    finally:
+        if second.poll() is None:
+            second.terminate()
+        second.wait(timeout=5)
+    wait_for(first_card, 'Dashboard removes the closed window card and retains the other preview')
+    remote('up')
+    time.sleep(.4)
+    remote('close')
+    time.sleep(.25)
+    remote('select')
+    try:
+        wait_for(lambda: not window(), 'Closing a window from the card works')
+    except RuntimeError:
+        print(cmd('qs', 'ipc', '-p', str(dashboard), 'call', 'entertainment', 'status'), flush=True)
+        print(cmd('qs', 'log', '-p', str(dashboard), '-t', '30'), flush=True)
+        raise
+    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="1"})')
+    wait_for(lambda: not visible(), 'Ordinary workspace is unaffected')
+    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="31"})')
+    wait_for(visible, 'Returning to the entertainment workspace restores its dashboard')
+    cmd('wtype', '-k', 'F10')
+    wait_for(lambda: not visible(), 'F10 turns off the dashboard on this workspace')
+    cmd(*manager, 'enable')
+    wait_for(visible, 'Entertainment mode can be re-enabled')
+    cmd(*manager, 'stop')
+    wait_for(lambda: not visible(), 'Dashboard stopped before testing the boot hook')
+    cmd('omarchy', 'hook', 'post-boot')
+    wait_for(visible, 'Post-boot hook restores the saved entertainment workspace')
+    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="1"})')
+    return True
+
+
 def installer_flow(output, env, config, baseline, preview=False):
     """Run real commands against the guest compositor and shell, without mocks."""
     home=Path.home()
@@ -274,6 +380,7 @@ def installer_flow(output, env, config, baseline, preview=False):
         (update_fixtures/'offline').unlink()
         guest_command(output,dict(env,OMARCHY_THEME_WAIT='1'),'update-back','omarchy','theme','set','vantaglass')
         print('Verified automatic release upgrades, other-theme preservation and offline hook continuation',flush=True)
+        entertainment_checked = check_entertainment(output, env, home)
         later=json.loads(shell_file.read_text());later['idle']['lock']=900;later['bar']['layout']['left'].append({'id':'omarchy.spacer','width':11});shell_file.write_text(json.dumps(later))
         config.write_text(config.read_text()+'-- Later guest user edit\n')
         guest_command(output,env,'restore',*manager,'restore')
@@ -284,6 +391,9 @@ def installer_flow(output, env, config, baseline, preview=False):
         expected_restored['left'].append({'id':'omarchy.spacer','width':11})
         if json.loads(shell_file.read_text())['bar']['layout']!=expected_restored:raise RuntimeError('Restore changed the original layout or a later widget edit')
         guest_command(output,env,'uninstall',*manager,'uninstall')
+        if (state/'entertainment.json').exists(): raise RuntimeError('Uninstall retained active entertainment workspace settings')
+        layers = json.loads(guest_command(output,env,'final-layers','hyprctl','-j','layers'))
+        if 'vantaglass-entertainment' in json.dumps(layers): raise RuntimeError('Uninstall left an entertainment layer')
         for path in [state/'installation.json',state/'preferences.json',state/'original-shell.json',settings/'plugins/vantaglass.style',settings/'plugins/vantaglass.menu',settings/'plugins/vantaglass.audio',settings/'plugins/vantaglass.monitor',settings/'plugins/vantaglass.network',settings/'plugins/vantaglass.bluetooth',settings/'plugins/vantaglass.power',settings/'plugins/vantaglass.clock',home/'.local/share/vantaglass/runtime',home/'.local/bin/vantaglass']:
             if path.exists():raise RuntimeError('Uninstall retained an active owned file: '+str(path))
         if guest_command(output,env,'final-configerrors','hyprctl','configerrors').strip():raise RuntimeError('Final compositor configuration has errors')
@@ -295,7 +405,7 @@ def installer_flow(output, env, config, baseline, preview=False):
         for marker in ['TypeError','ReferenceError','Binding loop','service plugin load failed','ShaderEffect: Failed']:
             if marker in log:raise RuntimeError('Guest shell integration error: '+marker)
         print('Verified real guest install, reinstall, restore and uninstall',flush=True)
-        return {'switches':results,'original_backup_retained':Path(manifest['backup']).is_file(),'later_edits_preserved':True,'restore':True,'uninstall':True,'ordinary_theme_switch_roundtrips':2,'post_boot_hook':True,'post_update_fallback':True,'automatic_release_updates':2,'update_preserved_other_theme':True,'offline_hook_continued':True,'command_boundary':'actual Omarchy, Quickshell and Hyprland; no command mocks'}
+        return {'switches':results,'original_backup_retained':Path(manifest['backup']).is_file(),'later_edits_preserved':True,'restore':True,'uninstall':True,'ordinary_theme_switch_roundtrips':2,'post_boot_hook':True,'post_update_fallback':True,'automatic_release_updates':2,'update_preserved_other_theme':True,'offline_hook_continued':True,'entertainment':entertainment_checked,'command_boundary':'actual Omarchy, Quickshell and Hyprland; no command mocks'}
     finally:
         for process in [terminal,shell]:
             if process is not None and process.poll() is None:
@@ -404,7 +514,7 @@ def inside(integration=False, preview=False):
     if vendor!='0x1af4':raise RuntimeError('Unexpected GPU PCI vendor: '+vendor)
     devices={'dri':[str(p) for p in Path('/dev/dri').glob('*')],'drm_sys':[str(p) for p in Path('/sys/class/drm').glob('*')],'driver':driver,'pci_vendor':vendor}
     (output/'devices.json').write_text(json.dumps(devices,indent=2)+'\n')
-    sources=[ROOT/'tools/vm_harness.py',ROOT/'tools/manage.py',ROOT/'tools/lifecycle.py',ROOT/'tools/updater.py',ROOT/'compatibility.json',ROOT/'hooks/vantaglass',ROOT/'hooks/vantaglass-update',*(p for folder in ['themes','plugins'] for p in (ROOT/folder).rglob('*') if p.is_file())]
+    sources=[ROOT/'tools/vm_harness.py',ROOT/'tools/manage.py',ROOT/'tools/lifecycle.py',ROOT/'tools/updater.py',ROOT/'compatibility.json',ROOT/'hooks/vantaglass',ROOT/'hooks/vantaglass-update',*(p for folder in ['themes','plugins','entertainment'] for p in (ROOT/folder).rglob('*') if p.is_file() and '__pycache__' not in p.parts)]
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}
     config=Path.home()/'.config/hypr/hyprland.lua'
     config.parent.mkdir(parents=True,exist_ok=True)
