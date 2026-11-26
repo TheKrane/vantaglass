@@ -2,8 +2,11 @@
 import copy
 
 STYLE = 'vantaglass.style'
+BAR = 'vantaglass.bar'
+ENTERTAINMENT = 'vantaglass.entertainment'
 CLONES = {'vantaglass.'+name: 'omarchy.'+name for name in ('menu','audio','monitor','network','bluetooth','power','clock')}
-OWNED = set(CLONES) | {STYLE}
+OWNED = set(CLONES) | {STYLE, BAR, ENTERTAINMENT}
+BAR_PROPERTIES = ('id', 'background', 'transparent')
 
 def entry_id(entry):
     return entry if isinstance(entry,str) else entry.get('id') if isinstance(entry,dict) else None
@@ -15,7 +18,7 @@ def renamed(entry, name):
 def activate(config, journal=None, conflicts=()):
     """Replace only present enabled native widgets, retaining their options/order."""
     result=copy.deepcopy(config)
-    journal=copy.deepcopy(journal or {'disabled_added':[], 'service_added':[], 'bar_before':{k:v for k,v in config.get('bar',{}).items() if k in ('background','transparent')}})
+    journal=copy.deepcopy(journal or {'disabled_added':[], 'service_added':[], 'bar_before':{k:v for k,v in config.get('bar',{}).items() if k in BAR_PROPERTIES}})
     disabled=result.setdefault('disabledPlugins',[])
     records=result.setdefault('plugins',[])
     layout=result.setdefault('bar',{}).setdefault('layout',{})
@@ -39,7 +42,20 @@ def activate(config, journal=None, conflicts=()):
             if source in journal['disabled_added'] and clone not in restores: restores.append(clone)
     if STYLE not in {entry_id(e) for e in records}:
         records.append({'id':STYLE});journal['service_added'].append(STYLE)
-    result['bar']['background']='none'
+    bar = result['bar']
+    if BAR not in disabled and bar.get('id', 'omarchy.bar') in ('', 'omarchy.bar'):
+        if 'id' in bar:
+            journal['bar_before']['id'] = bar['id']
+        else:
+            journal['bar_before'].pop('id', None)
+        bar['id'] = BAR
+    if ENTERTAINMENT not in disabled and not any(entry_id(entry) == ENTERTAINMENT for rows in layout.values() for entry in rows):
+        for rows in layout.values():
+            index = next((i for i, entry in enumerate(rows) if entry_id(entry) == 'omarchy.workspaces'), None)
+            if index is not None:
+                rows.insert(index + 1, {'id': ENTERTAINMENT})
+                break
+    bar['background']='none'
     return result,journal
 
 def deactivate(config,journal=None,uninstall=False):
@@ -48,12 +64,12 @@ def deactivate(config,journal=None,uninstall=False):
     layout=result.get('bar',{}).get('layout',{})
     native={entry_id(e) for rows in layout.values() for e in rows if entry_id(e) not in OWNED}
     for section,rows in layout.items():
-        layout[section]=[renamed(e,CLONES[entry_id(e)]) if entry_id(e) in CLONES else e for e in rows if entry_id(e)!=STYLE and not (entry_id(e) in CLONES and CLONES[entry_id(e)] in native)]
+        layout[section]=[renamed(e,CLONES[entry_id(e)]) if entry_id(e) in CLONES else e for e in rows if entry_id(e) not in (STYLE, ENTERTAINMENT) and not (entry_id(e) in CLONES and CLONES[entry_id(e)] in native)]
     added=set(journal.get('service_added',[]))
     records=[]
     for e in result.get('plugins',[]):
         name=entry_id(e)
-        if name==STYLE or name in added:continue
+        if name in (STYLE, BAR, ENTERTAINMENT) or name in added:continue
         records.append(renamed(e,CLONES[name]) if name in CLONES else e)
     if 'plugins' in result:result['plugins']=records
     if 'disabledPlugins' in result:
@@ -62,6 +78,11 @@ def deactivate(config,journal=None,uninstall=False):
         result['disabledPlugins']=[e for e in result['disabledPlugins'] if e not in remove]
     if 'cloneSourceRestores' in result:result['cloneSourceRestores']=[e for e in result['cloneSourceRestores'] if e not in OWNED]
     bar=result.get('bar',{})
+    if bar.get('id') == BAR:
+        bar.pop('id')
+        before = journal.get('bar_before', {})
+        if 'id' in before:
+            bar['id'] = before['id']
     if bar.get('background')=='none' and 'bar_before' in journal:
         for k in ('background','transparent'):
             bar.pop(k,None)

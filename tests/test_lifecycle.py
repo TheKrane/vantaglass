@@ -30,6 +30,22 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(restored['idle']['lock'],999)
         self.assertEqual(restored['bar']['background'],'glassy')
         self.assertEqual(restored['bar']['layout']['right'][-1],{'id':'custom.new'})
+    def test_entertainment_sits_after_workspaces_and_restores_the_bar(self):
+        original = self.config()
+        original['bar']['id'] = 'omarchy.bar'
+        original['bar']['layout']['left'].insert(1, {'id': 'omarchy.workspaces', 'option': True})
+        active, journal = lifecycle.activate(original)
+        self.assertEqual(active['bar']['id'], lifecycle.BAR)
+        self.assertEqual(active['bar']['layout']['left'][1:3], [
+            {'id': 'omarchy.workspaces', 'option': True}, {'id': lifecycle.ENTERTAINMENT}
+        ])
+        self.assertEqual(lifecycle.deactivate(active, journal)['bar'], original['bar'])
+    def test_a_user_selected_bar_is_preserved(self):
+        original = self.config()
+        original['bar']['id'] = 'custom.bar'
+        active, journal = lifecycle.activate(original)
+        self.assertEqual(active['bar']['id'], 'custom.bar')
+        self.assertEqual(lifecycle.deactivate(active, journal)['bar']['id'], 'custom.bar')
     def test_idempotent_activate_and_deactivate(self):
         active,journal=lifecycle.activate(self.config())
         self.assertEqual(lifecycle.activate(active,journal),(active,journal))

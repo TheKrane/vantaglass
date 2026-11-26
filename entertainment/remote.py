@@ -7,10 +7,10 @@ import time
 
 # SDL's standard game-controller layout provides a common mapping for pads.
 BUTTONS = {
-    0: "select", 1: "back", 2: "close", 5: "home", 6: "exit",
+    0: "select", 1: "back", 2: "close", 3: "fullscreen", 5: "home", 6: "exit",
     11: "up", 12: "down", 13: "left", 14: "right",
 }
-DIRECTIONS = {"up", "down", "left", "right"}
+REPEATING_ACTIONS = {"left", "right"}
 
 # Linux EV_KEY codes for a dedicated media remote. Open it read-only and leave
 # event delivery to the compositor and other applications intact.
@@ -18,7 +18,7 @@ REMOTE_KEYS = {
     103: "up", 108: "down", 105: "left", 106: "right",
     28: "select", 352: "select", 353: "select",
     158: "back", 174: "exit", 1: "back",
-    139: "close", 172: "home", 102: "home",
+    139: "close", 172: "home", 102: "home", 372: "fullscreen",
 }
 INPUT_EVENT = struct.Struct("@llHHi")
 
@@ -82,7 +82,7 @@ class ControllerInput:
         for key, due in self.held.items():
             if now >= due:
                 action = key[1]
-                self.held[key] = now + (0.14 if due else 0.40) if action in DIRECTIONS else float("inf")
+                self.held[key] = now + (0.14 if due else 0.40) if action in REPEATING_ACTIONS else float("inf")
                 yield action
 
 
@@ -115,7 +115,7 @@ class RemoteInput:
             return
         for _, _, kind, key, value in INPUT_EVENT.iter_unpack(events):
             action = REMOTE_KEYS.get(key)
-            if kind == 1 and action and (value == 1 or value == 2 and action in DIRECTIONS):
+            if kind == 1 and action and (value == 1 or value == 2 and action in REPEATING_ACTIONS):
                 yield action
 
 

@@ -7,12 +7,14 @@
   "description": "Native-size Omarchy command menu with Vantaglass glass and popup geometry.",
   "kinds": [
     "menu",
-    "bar-widget"
+    "bar-widget",
+    "service"
   ],
   "keepLoaded": true,
   "entryPoints": {
     "menu": "Menu.qml",
-    "barWidget": "BarWidget.qml"
+    "barWidget": "BarWidget.qml",
+    "service": "Entertainment.qml"
   },
   "barWidget": {
     "displayName": "Omarchy menu",

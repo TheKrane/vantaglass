@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "vantaglass.bar",
+  "name": "Omarchy bar · Vantaglass",
+  "version": "0.1.0",
+  "author": "Vantaglass",
+  "description": "Omarchy bar with per-workspace visibility for Entertainment.",
+  "kinds": ["bar"],
+  "entryPoints": {
+    "bar": "Bar.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.bar"
+  }
+}

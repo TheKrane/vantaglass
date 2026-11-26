@@ -1,0 +1,13 @@
+{
+  "leave": "Leave",
+  "page": "%1 / %2",
+  "browseControls": "Super+↑ Fullscreen    Enter / A Open    Del / X Close",
+  "recentList": "↑↓ Open & recent",
+  "allList": "↑↓ All apps",
+  "emptyRecent": "Open an app from All apps to start your recent list.",
+  "emptyAll": "No apps available.",
+  "confirm": "Close this window?    Enter / A Close    Esc / B Cancel",
+  "working": "Launching…",
+  "launchFailed": "The app has not opened a window here.",
+  "actionFailed": "Could not change the window. Try again."
+}

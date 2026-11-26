@@ -25,6 +25,7 @@ STATE = HOME/'.local/state/vantaglass'
 PLUGIN = 'vantaglass.style'
 MENU = 'vantaglass.menu'
 PANELS = ['vantaglass.audio', 'vantaglass.monitor', 'vantaglass.network', 'vantaglass.bluetooth', 'vantaglass.power', 'vantaglass.clock']
+MANAGED_PLUGINS = [PLUGIN, MENU, *PANELS, lifecycle.BAR, lifecycle.ENTERTAINMENT]
 
 def run(*args):
     env = dict(os.environ, OMARCHY_THEME_WAIT='1')
@@ -69,6 +70,15 @@ def runtime_path():
 def runtime_owned(path):
     marker = path/'.vantaglass-managed'
     return not path.is_symlink() and marker.is_file() and marker.read_text() == 'Vantaglass managed runtime\n'
+
+def stop_old_entertainment():
+    dashboard = runtime_path()/'entertainment/shell.qml'
+    if not dashboard.is_file():
+        return
+    try:
+        subprocess.run(['qs', 'kill', '-p', str(dashboard)], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print('Could not stop the previous entertainment shell: '+str(error), file=sys.stderr)
 
 def install_runtime():
     """Keep management commands usable after the source checkout is moved."""
@@ -116,12 +126,37 @@ def compatibility_issues():
     return [name for name,digest in manifest['files'].items()
             if not (base/name).is_file() or hashlib.sha256((base/name).read_bytes()).hexdigest()!=digest]
 
+def workspace_bar_files():
+    """Hide the bar content without changing Hyprland's work area."""
+    upstream = Path(os.environ.get('OMARCHY_PATH', '/usr/share/omarchy'))/'shell/plugins/bar'
+    source = (upstream/'Bar.qml').read_text()
+    marker = '  component BarPanel: PanelWindow {\n    id: barWindow\n'
+    head, found, panel = source.partition(marker)
+    mask = '    mask: dragActive ? null : (underFullscreen ? noInputRegion : stripInputRegion)'
+    strip = '    Item {\n      id: barStrip\n'
+    tooltip = '      visible: root.tooltipShown && root.tooltipTarget !== null'
+    widget = '      var target = activeItem\n      if (!target) return'
+    if not found or any(panel.count(anchor) != 1 for anchor in (mask, strip, tooltip, widget)):
+        raise RuntimeError('The installed Omarchy bar no longer supports this workspace visibility override')
+    panel = panel.replace(mask, '    mask: inEntertainment ? noInputRegion : (dragActive ? null : (underFullscreen ? noInputRegion : stripInputRegion))')
+    panel = panel.replace(strip, strip + '      visible: !barWindow.inEntertainment\n')
+    panel = panel.replace(tooltip, '      visible: !barWindow.inEntertainment && root.tooltipShown && root.tooltipTarget !== null')
+    # A queued widget injection can outlive the custom bar on a theme switch.
+    panel = panel.replace(widget, '      var target = activeItem\n'
+                                  '      if (!target || (!firstParty && typeof root?.pluginBarApiFor !== "function")) return')
+    visibility = '''
+    // Keep the layer reservation stable across workspace switches.
+    readonly property bool inEntertainment: Hyprland.monitorFor(screen)?.activeWorkspace?.name === "entertainment"
+'''
+    return {'Bar.qml': ('// Adapted from Omarchy (MIT).\n' + head + marker + visibility + panel).encode(),
+            'BarModel.js': (upstream/'BarModel.js').read_bytes()}
+
 def hook_paths():
     return [CONFIG/'omarchy/hooks'/(event+'.d')/('vantaglass-update' if event=='post-update' else 'vantaglass') for event in ('theme-set','post-update','post-boot')]
 
 def validate_destinations():
     installed = (STATE/'installation.json').is_file()
-    paths = [CONFIG/'omarchy/themes/vantaglass',*[CONFIG/'omarchy/plugins'/name for name in [PLUGIN,MENU,*PANELS]]]
+    paths = [CONFIG/'omarchy/themes/vantaglass',*[CONFIG/'omarchy/plugins'/name for name in MANAGED_PLUGINS]]
     for path in paths:
         if path.is_symlink() or (path.exists() and not installed):
             raise RuntimeError('Refusing to overwrite an existing unowned path: '+str(path))
@@ -149,7 +184,31 @@ def restoration_journal(config):
              if clone in bar_widget_ids(config) or clone in config.get('cloneSourceRestores',[])]
     added = [source for source in added if source not in original.get('disabledPlugins',[])]
     return {'disabled_added':added,'service_added':[PLUGIN]+([MENU] if MENU not in bar_widget_ids(original) and 'omarchy.menu' not in bar_widget_ids(original) else []),
-            'bar_before':{k:v for k,v in original.get('bar',{}).items() if k in ('background','transparent')}}
+            'bar_before':{k:v for k,v in original.get('bar',{}).items() if k in lifecycle.BAR_PROPERTIES}}
+
+def save_shell_config(path, previous, updated):
+    if previous == updated:
+        return
+    save_json(path, updated)
+    previous_bar = previous.get('bar', {}).get('id')
+    selected_bar = updated.get('bar', {}).get('id')
+    if previous_bar == selected_bar:
+        return
+
+    # Rebuild the widget catalog after Omarchy changes bar implementations.
+    # The scoped catalog can retain null first-party components after a hot switch.
+    shell = ['omarchy-shell', 'shell']
+    try:
+        subprocess.run([*shell, 'reloadConfig'], capture_output=True, check=True, timeout=2)
+        for _ in range(12):
+            effective = json.loads(subprocess.check_output([*shell, 'listShellConfig'], text=True, timeout=2))
+            if effective.get('bar', {}).get('id') == selected_bar:
+                break
+            time.sleep(.05)
+        subprocess.run([*shell, 'rescanPlugins'], capture_output=True, check=True, timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # A shell that is down will read the saved configuration at startup.
+        pass
 
 def sync():
     """Reconcile only our overlay, also usable when updated shell IPC is broken."""
@@ -158,7 +217,8 @@ def sync():
     config = json.loads(path.read_text())
     journal_path = STATE/'companion.json'
     journal = json.loads(journal_path.read_text()) if journal_path.exists() else None
-    if journal is None and (bar_widget_ids(config) & set(lifecycle.CLONES) or any(plugin_entry_id(e) in lifecycle.OWNED for e in config.get('plugins',[]))):
+    if journal is None and (bar_widget_ids(config) & lifecycle.OWNED or config.get('bar', {}).get('id') == lifecycle.BAR
+                            or any(plugin_entry_id(e) in lifecycle.OWNED for e in config.get('plugins',[]))):
         journal = restoration_journal(config)
     active = (HOME/'.local/state/omarchy/current/theme.name').read_text().strip()
     issues = compatibility_issues()
@@ -176,7 +236,7 @@ def sync():
         updated = lifecycle.deactivate(config,journal)
         journal_path.unlink(missing_ok=True)
         if issues: print('Vantaglass: upstream interfaces changed; native panels retained. Run vantaglass doctor for details.',file=sys.stderr)
-    if updated != config: save_json(path,updated)
+    save_shell_config(path, config, updated)
 
 def enable_companion_widgets():
     sync()
@@ -193,7 +253,7 @@ def install():
         raise RuntimeError('An unrelated ~/.local/bin/vantaglass already exists')
     if runtime_path().exists() and not runtime_owned(runtime_path()):
         raise RuntimeError('An unrelated Vantaglass runtime directory already exists')
-    paths = [CONFIG/'omarchy/shell.json',CONFIG/'hypr/hyprland.lua',launcher,runtime_path(),STATE/'installation.json',STATE/'companion.json',STATE/'original-shell.json',*hook_paths(),CONFIG/'omarchy/themes/vantaglass',*[CONFIG/'omarchy/plugins'/name for name in [PLUGIN,MENU,*PANELS]]]
+    paths = [CONFIG/'omarchy/shell.json',CONFIG/'hypr/hyprland.lua',launcher,runtime_path(),STATE/'installation.json',STATE/'companion.json',STATE/'original-shell.json',*hook_paths(),CONFIG/'omarchy/themes/vantaglass',*[CONFIG/'omarchy/plugins'/name for name in MANAGED_PLUGINS]]
     paths += [path.resolve() for path in paths[:2] if path.is_symlink()]
     with tempfile.TemporaryDirectory(prefix='vantaglass-rollback-') as temporary:
         originals = []
@@ -220,6 +280,8 @@ def _install():
     issues = compatibility_issues()
     if issues: raise RuntimeError('Unsupported Omarchy interfaces; no installation changes made. Changed: '+', '.join(issues[:8]))
     validate_destinations()
+    bar_files = workspace_bar_files()
+    bar_plugin = CONFIG/'omarchy/plugins'/lifecycle.BAR
     launcher = HOME/'.local/bin/vantaglass'
     if launcher.exists() and 'Vantaglass managed launcher' not in launcher.read_text():
         raise RuntimeError('An unrelated ~/.local/bin/vantaglass already exists')
@@ -245,18 +307,24 @@ def _install():
         for path in (ROOT/'plugins').rglob('*')
         if path.is_file() and path.suffix in ['.qml','.qsb','.js','.json']
     )
+    if bar_plugin.is_dir():
+        code_changed |= any(not (bar_plugin/name).is_file() or (bar_plugin/name).read_bytes() != contents
+                            for name, contents in bar_files.items())
     # Archive previous owned assets, including edits, before replacing them.
-    for path in [CONFIG/'omarchy/themes/vantaglass', *[CONFIG/'omarchy/plugins'/name for name in [PLUGIN,MENU,*PANELS]]]:
+    for path in [CONFIG/'omarchy/themes/vantaglass', *[CONFIG/'omarchy/plugins'/name for name in MANAGED_PLUGINS]]:
         if path.exists():
             dest = STATE/'upgrades'/str(time.time_ns())/path.name
             dest.parent.mkdir(parents=True,exist_ok=True)
             shutil.copytree(path,dest)
             shutil.rmtree(path)
     shutil.copytree(ROOT/'themes/vantaglass', CONFIG/'omarchy/themes/vantaglass', dirs_exist_ok=True)
-    for plugin in [PLUGIN, MENU, *PANELS]:
+    for plugin in MANAGED_PLUGINS:
         shutil.copytree(ROOT/'plugins'/plugin, CONFIG/'omarchy/plugins'/plugin, dirs_exist_ok=True)
+    for name, contents in bar_files.items():
+        (bar_plugin/name).write_bytes(contents)
     bindir = HOME/'.local/bin'
     bindir.mkdir(parents=True, exist_ok=True)
+    stop_old_entertainment()
     runtime = install_runtime()
     manifest = json.loads((STATE/'installation.json').read_text())
     if manifest.get('runtime') != str(runtime):
@@ -322,7 +390,7 @@ def deactivate_companion():
     journal_path = STATE/'companion.json'
     journal = json.loads(journal_path.read_text()) if journal_path.exists() else restoration_journal(current)
     updated = lifecycle.deactivate(current,journal,uninstall=True)
-    if updated != current: save_json(path,updated)
+    save_shell_config(path, current, updated)
     journal_path.unlink(missing_ok=True)
 
 def restore():
@@ -348,21 +416,16 @@ def uninstall():
     for path in hook_paths():
         if path.is_file() and 'Vantaglass managed hook' in path.read_text():
             shutil.copy2(path,destination/(path.parent.name+'-hook'));path.unlink()
-    dashboard = runtime_path()/'entertainment/shell.qml'
-    if dashboard.is_file():
-        try:
-            subprocess.run(['qs', 'kill', '-p', str(dashboard)], capture_output=True, timeout=5)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            print('Could not stop the entertainment dashboard: '+str(error), file=sys.stderr)
+    stop_old_entertainment()
     restore()
-    owned = [CONFIG/'omarchy/plugins'/name for name in [PLUGIN,MENU,*PANELS]]
+    owned = [CONFIG/'omarchy/plugins'/name for name in MANAGED_PLUGINS]
     owned += [CONFIG/'omarchy/themes/vantaglass']
     if runtime_owned(runtime_path()): owned.append(runtime_path())
     for path in owned:
         if path.exists(): shutil.move(str(path),str(destination/path.name))
     launcher = HOME/'.local/bin/vantaglass'
     if launcher.exists() and 'Vantaglass managed launcher' in launcher.read_text(): launcher.unlink()
-    for name in ['installation.json','preferences.json','original-shell.json']:
+    for name in ['installation.json','preferences.json','original-shell.json','entertainment-recents.json']:
         if (STATE/name).exists(): shutil.move(str(STATE/name),str(destination/name))
     entertainment_state = Path(os.environ.get('XDG_STATE_HOME') or HOME/'.local/state')/'vantaglass/entertainment.json'
     if entertainment_state.is_file():

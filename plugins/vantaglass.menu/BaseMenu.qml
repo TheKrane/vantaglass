@@ -297,10 +297,10 @@ Item {
     var translatedDefaults = MenuModel.applyTranslations(root.defaultMenuItems, root.menuCatalog)
     translatedDefaults = translatedDefaults.concat(MenuModel.parseMenuJsonc(JSON.stringify({
       "appearance.entertainment": {
-        label: qsTr("Entertainment Mode"),
+        label: qsTr("Entertainment"),
         icon: "󰊴",
-        description: qsTr("Toggle the entertainment dashboard on this workspace"),
-        action: "~/.local/bin/vantaglass entertainment toggle"
+        description: qsTr("Switch to the Entertainment workspace"),
+        action: "~/.local/bin/vantaglass entertainment show"
       }
     })))
     // The root row is injected by the merge (it has no JSONC entry), so its

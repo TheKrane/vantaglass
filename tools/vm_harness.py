@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Disposable virtual-GPU Hyprland probe. Never use host compositor sockets."""
 import argparse
+import fcntl
 import gzip
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
@@ -72,109 +74,379 @@ def capture_preview(output, env, config):
             except subprocess.TimeoutExpired:process.kill();process.wait()
         log.close()
 
-def check_entertainment(output, env, home):
-    dashboard = home/'.local/share/vantaglass/runtime/entertainment/shell.qml'
+def add_entertainment_fixture(home):
+    apps = home/'.local/share/applications'
+    apps.mkdir(parents=True, exist_ok=True)
+    program = home/'entertainment-probe.py'
+    program.write_text('import time\nprint("Terminal one\\n\\nEntertainment", flush=True)\ntime.sleep(120)\n')
+    (apps/'entertainment-probe.desktop').write_text(
+        '[Desktop Entry]\nType=Application\nName=000 Preview test\nStartupWMClass=entertainment-probe\n'
+        'Exec=foot --app-id=entertainment-probe --title="Terminal one" -o colors-dark.background=941d35 '
+        f'python {program}\n'
+    )
+    (apps/'entertainment-second.desktop').write_text(
+        '[Desktop Entry]\nType=Application\nName=001 Second app\nStartupWMClass=entertainment-second\n'
+        'Exec=foot --app-id=entertainment-second --title=Second -o colors-dark.background=145875 sleep 120\n'
+    )
+
+
+def check_entertainment_drag(output, env, cmd, window, window_geometry, wait_for, switch_workspace,
+                             regular_workspace, stage, tile, menu_shown, snapshot):
+    def emit(*events):
+        for event in (*events, (0, 0, 0)):
+            device.write(struct.pack('@llHHi', 0, 0, *event))
+        time.sleep(.08)
+
+    def center(app):
+        (x, y), (width, height) = window_geometry(app)
+        return x + width // 2, y + height // 2
+
+    def move_to(x, y):
+        current = json.loads(cmd('hyprctl', '-j', 'cursorpos'))
+        emit((2, 0, x - current['x']), (2, 1, y - current['y']))
+
+    def drag(source, destination, check_held, button=272):
+        move_to(*source)
+        emit((1, button, 1))
+        try:
+            move_to(*destination)
+            check_held()
+        finally:
+            emit((1, button, 0))
+
+    def drag_with_super(button, source, destination, check_held):
+        with subprocess.Popen(['wtype', '-M', 'logo', '-s', '900', '-m', 'logo'], env=env):
+            time.sleep(.12)
+            drag(source, destination, check_held, button)
+
+    def border_resize_enabled():
+        return json.loads(cmd('hyprctl', '-j', 'getoption', 'general:resize_on_border'))['bool']
+
+    first, second = 'entertainment-probe', 'entertainment-second'
+    with open('/dev/uinput', 'wb', buffering=0) as device:
+        # EV_KEY, EV_REL, BTN_LEFT/RIGHT, REL_X/Y on a guest-only libinput mouse.
+        for request, codes in [(100, (1, 2)), (101, (272, 273)), (102, (0, 1))]:
+            for code in codes:
+                fcntl.ioctl(device, 0x40045500 + request, code)
+        fcntl.ioctl(device, 0x405c5503, struct.pack('@HHHH80sI', 3, 1, 1, 1, b'Vantaglass Test Mouse', 0))
+        fcntl.ioctl(device, 0x5501)
+        wait_for(lambda: 'vantaglass-test-mouse' in cmd('hyprctl', 'devices'), 'The guest mouse is available')
+
+        start = [window_geometry(app) for app in (first, second)]
+        order = snapshot()['windows']
+
+        def unchanged():
+            if snapshot()['windows'] != order or [window_geometry(app) for app in (first, second)] != start:
+                raise RuntimeError('Dragging changed the Entertainment layout before an accepted drop')
+
+        if border_resize_enabled():
+            raise RuntimeError('Border resize is enabled in Entertainment')
+        drag_with_super(272, center(first), (115, 120), unchanged)
+        drag_with_super(273, center(first), (115, 120), unchanged)
+        drag(center(second), (30, 400), unchanged)
+        unchanged()
+        if not menu_shown():
+            raise RuntimeError('A canceled shelf drag took the stage fullscreen')
+        print('Free dragging and canceled drops leave both Entertainment windows in place', flush=True)
+
+        drag(center(second), center(first), unchanged)
+        wait_for(lambda: stage(window(second)) and tile(window(first)) and menu_shown(),
+                 'A shelf-to-stage drop swaps both live slots and keeps the shelf open')
+        if [window_geometry(app) for app in (second, first)] != start or snapshot()['windows'][:2] != order[:2][::-1]:
+            raise RuntimeError('The drop did not use the source shelf slot and stage rectangle')
+        cmd('grim', str(output/'entertainment-drag-swap.png'))
+
+        time.sleep(.4)
+        drag(center(first), center(second), lambda: None)
+        wait_for(lambda: stage(window(first)) and tile(window(second)), 'The next drop swaps the windows back')
+
+        switch_workspace(regular_workspace)
+        wait_for(border_resize_enabled, 'Omarchy border resizing returns on the regular workspace')
+        regular = 'vantaglass-validation'
+        drag_with_super(272, center(regular), (130, 180),
+                        lambda: wait_for(lambda: window(regular).get('floating'), 'Super+drag still works in regular tiling'))
+        wait_for(lambda: not window(regular).get('floating'), 'The regular window returns to tiling on release')
+        switch_workspace('name:entertainment')
+        wait_for(menu_shown, 'The shelf remains available after leaving and returning')
+
+
+def check_entertainment(output, env, home, config):
+    ipc = ['omarchy-shell', 'vantaglass.entertainment']
     manager = [str(home/'.local/bin/vantaglass'), 'entertainment']
 
     def cmd(*args):
         return subprocess.check_output(args, env=env, text=True, timeout=8).strip()
 
     def wait_for(predicate, message):
-        for _ in range(70):
+        for _ in range(90):
             if predicate():
                 print(message, flush=True)
                 return
             time.sleep(.1)
+        if controller_live():
+            print(cmd(*ipc, 'status'), cmd(*manager, 'snapshot'), flush=True)
+        print(cmd('hyprctl', '-j', 'clients'), flush=True)
         raise RuntimeError(message)
 
-    def visible():
+    def controller_live():
+        return subprocess.run([*ipc, 'status'], env=env, capture_output=True, timeout=5).returncode == 0
+
+    def workspace():
+        return json.loads(cmd('hyprctl', '-j', 'activeworkspace'))['name']
+
+    def shelf_layer():
         layers = json.loads(cmd('hyprctl', '-j', 'layers'))
-        return any(layer['namespace'] == 'vantaglass-entertainment'
-                   for monitor in layers.values() for level in monitor['levels'].values() for layer in level)
+        return next((layer for monitor in layers.values() for level in monitor['levels'].values() for layer in level
+                     if layer['namespace'] == 'vantaglass-entertainment'), None)
+
+    def shelf_mapped():
+        return shelf_layer() is not None
+
+    def bar_at_edge():
+        monitor = json.loads(cmd('hyprctl', '-j', 'monitors'))[0]
+        layers = json.loads(cmd('hyprctl', '-j', 'layers'))[monitor['name']]['levels']
+        return monitor['reserved'][1] > 0 and any(
+            layer['namespace'] == 'omarchy-bar' and layer['y'] + layer['h'] > 0 and layer['alpha'] > .95
+            for level in layers.values() for layer in level)
+
+    def bar_geometry():
+        monitor = json.loads(cmd('hyprctl', '-j', 'monitors'))[0]
+        layers = json.loads(cmd('hyprctl', '-j', 'layers'))[monitor['name']]['levels']
+        bar = next((layer for level in layers.values() for layer in level if layer['namespace'] == 'omarchy-bar'), {})
+        return (monitor['reserved'], [bar.get(key) for key in ('x', 'y', 'w', 'h')])
+
+    def bar_slots():
+        return json.loads(cmd('omarchy-shell', 'shell', 'debugBarGeometry'))
+
+    def indicator(visible):
+        slots = bar_slots()
+        icon = next((slot for slot in slots if slot['id'] == 'vantaglass.entertainment'), None)
+        if icon is None or icon['visible'] != visible:
+            return False
+        if not visible:
+            return icon['width'] == 0
+        workspaces = next((slot for slot in slots if slot['id'] == 'omarchy.workspaces'), None)
+        return bool(workspaces and workspaces['visible'] and icon['section'] == workspaces['section']
+                    and 0 <= icon['x'] - (workspaces['x'] + workspaces['width']) <= 12)
 
     def window(app='entertainment-probe'):
         return next((client for client in json.loads(cmd('hyprctl', '-j', 'clients'))
                      if client['class'] == app), {})
 
+    def window_geometry(app):
+        client = window(app)
+        return client.get('at'), client.get('size')
+
+    def switch_workspace(name):
+        cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace=' + json.dumps(name) + '})')
+
     def remote(action):
-        cmd('qs', 'ipc', '-p', str(dashboard), 'call', 'entertainment', 'input', action)
+        cmd(*ipc, 'input', action)
 
-    apps = home/'.local/share/applications'
-    apps.mkdir(parents=True, exist_ok=True)
-    (apps/'entertainment-probe.desktop').write_text(
-        '[Desktop Entry]\nType=Application\nName=000 Preview test\nStartupWMClass=entertainment-probe\n'
-        'Exec=foot --app-id=entertainment-probe --title=Preview-test -o colors-dark.background=941d35 sleep 120\n'
-    )
-    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="31"})')
-    cmd('omarchy-shell', 'shell', 'summon', 'omarchy.menu', '{"menu":"appearance.entertainment"}')
-    wait_for(visible, 'Omarchy menu opened the installed dashboard on workspace 31')
-    cmd('wtype', '-k', 'Return')
-    wait_for(lambda: window().get('fullscreen') == 2 and not visible(), 'Launching an app fullscreen from the dashboard works')
-    cmd(*manager, 'show')
-    wait_for(visible, 'Installed command recovered the dashboard from fullscreen')
-    image = output/'entertainment-running.png'
+    def menu_shown():
+        status = json.loads(cmd(*ipc, 'status'))
+        return status['browsing'] and any(shelf['shown'] and shelf['width'] > 0 for shelf in status['shelf'])
 
-    def preview_colors():
-        cmd('grim', str(image))
-        return cmd('magick', str(image), '-format', '%c', 'histogram:info:')
+    def shelf_contents(app_list, entries):
+        status = json.loads(cmd(*ipc, 'status'))
+        return any(shelf['shown'] and shelf['appList'] == app_list
+                   and shelf['entries'][:len(entries)] == entries
+                   and (entries or not shelf['entries']) for shelf in status['shelf'])
 
-    def both_cards():
-        colors = preview_colors()
-        return '#941D35' in colors and '#145875' in colors
+    def focus_view(view):
+        cmd('hyprctl', 'dispatch', 'hl.dsp.global("vantaglass:entertainment-' + view + '")')
 
-    def first_card():
-        colors = preview_colors()
-        return '#941D35' in colors and '#145875' not in colors
+    def snapshot():
+        return json.loads(cmd(*manager, 'snapshot'))
 
-    wait_for(first_card, 'Running window card contains pixels from the test application')
-    cmd('wtype', '-k', 'Up', '-k', 'Return')
-    wait_for(lambda: window().get('fullscreen') == 2 and not visible(), 'Selecting a running window returns it to fullscreen')
-    remote('home')
-    wait_for(visible, 'Remote Home action returns to the dashboard')
+    def dimensions():
+        monitor = json.loads(cmd('hyprctl', '-j', 'monitors'))[0]
+        width, height = monitor['width'], monitor['height']
+        return (height, width) if monitor['transform'] % 2 else (width, height)
+
+    def aspect_matches(client):
+        width, height = client.get('size', [0, 0])
+        display_width, display_height = dimensions()
+        return height > 0 and abs(width * display_height - height * display_width) <= max(display_width, display_height)
+
+    def stage(client):
+        return client.get('size', [0, 0])[1] > 330 and client.get('fullscreen') == 0 and aspect_matches(client)
+
+    def tile(client):
+        return 45 <= client.get('size', [0, 0])[1] <= 116 and aspect_matches(client)
+
+    def fullscreen_stage(app='entertainment-probe'):
+        client = window(app)
+        if client.get('fullscreen') != 2 or tuple(client['size']) != dimensions():
+            return False
+        return (json.loads(cmd('hyprctl', '-j', 'activewindow')).get('address') == client['address']
+                and not menu_shown() and shelf_mapped())
+
+    regular_app = 'vantaglass-validation'
+    regular_workspace = window(regular_app)['workspace']['name']
+    switch_workspace(regular_workspace)
+    regular_geometry = window_geometry(regular_app)
+    switch_workspace('31')
+    wait_for(lambda: bar_at_edge() and indicator(False), 'The bar shows and the empty Entertainment indicator takes no space')
+    reservation = bar_geometry()
+    binds = json.loads(cmd('hyprctl', '-j', 'binds'))
+    if not any(bind['description'] == 'Enter or return to Entertainment'
+               and bind['key'].upper() == 'E' and bind['modmask'] == 64 for bind in binds):
+        raise RuntimeError('Hyprland did not register Super+E for Entertainment')
+    for key, target in [('UP', 'stage'), ('DOWN', 'apps')]:
+        matches = [bind for bind in binds if bind['key'].upper() == key and bind['modmask'] == 64]
+        if len(matches) != 1 or matches[0]['description'] != f'Focus Entertainment {target} or move window focus':
+            raise RuntimeError('Hyprland did not register a single Entertainment binding for Super+'+key)
+    focus_view('apps')
+    if workspace() != '31':
+        raise RuntimeError('Entertainment focus shortcut changed an ordinary workspace')
+    cmd('hyprctl', 'repl', 'hl.animation({leaf="fadeLayersIn",enabled=true,speed=20,bezier="default"})')
+    cmd('hyprctl', 'dispatch', 'hl.dsp.global("vantaglass:entertainment")')
+    wait_for(shelf_mapped, 'The Entertainment shelf maps on the workspace switch')
+    if shelf_layer()['alpha'] < .99:
+        raise RuntimeError('The Entertainment shelf inherited the layer fade on entry')
+    wait_for(lambda: workspace() == 'entertainment' and menu_shown() and snapshot()['geometry'].get('shelfWidth', 0) > 0,
+             'Super+E enters the dedicated workspace')
+    wait_for(lambda: not any(slot['visible'] for slot in bar_slots()) and bar_geometry() == reservation,
+             'The bar hides without moving its surface or changing the work area')
+    wait_for(lambda: shelf_contents('recent', []), 'The shelf starts on Open & recent')
+    cmd('wtype', '-k', 'Down')
+    wait_for(lambda: shelf_contents('all', ['entertainment-probe', 'entertainment-second']),
+             'Plain Down shows the alphabetical app catalog')
+    cmd('wtype', '-k', 'Up')
+    wait_for(lambda: shelf_contents('recent', []), 'Plain Up returns to Open & recent')
+    remote('down')
+    wait_for(lambda: shelf_contents('all', ['entertainment-probe']), 'Controller Down also switches lists')
+    remote('select')
+    wait_for(fullscreen_stage, 'The first app opens fullscreen and receives input')
+    main_address = window()['address']
+    remote('right')
+    if not fullscreen_stage():
+        raise RuntimeError('Controller navigation interrupts the stage app')
+    cmd('grim', str(output/'entertainment-fullscreen.png'))
+    focus_view('apps')
+    wait_for(lambda: menu_shown() and stage(window()), 'Super+Down restores the shelf and windowed stage')
+    remote('down')
+    wait_for(lambda: shelf_contents('recent', []), 'The stage app is omitted from the recent shelf')
     second = subprocess.Popen(['foot', '--app-id=entertainment-second', '--title=Second', '-o',
                                'colors-dark.background=145875', 'sleep', '120'], env=env)
     try:
-        wait_for(both_cards, 'Both cards render live window previews')
-        cmd(*manager, 'fullscreen', '31', window()['address'])
-        remote('right')
-        remote('select')
-        wait_for(lambda: window('entertainment-second').get('fullscreen') == 2 and not visible(),
-                 'Fullscreen transfers to the selected window')
+        wait_for(lambda: tile(window('entertainment-second')) and stage(window()),
+                 'The stage and the real shelf window match the display’s aspect ratio')
+        second_address = window('entertainment-second')['address']
+        wait_for(lambda: shelf_contents('recent', [second_address]), 'Open windows are listed before recent apps')
+        original_config = config.read_text()
+        config.write_text(original_config + '\nhl.monitor({ output = "Virtual-1", mode = "1280x720@60", position = "0x0", scale = 1 })\n')
+        try:
+            cmd('hyprctl', 'reload')
+            wait_for(lambda: dimensions() == (1280, 720) and stage(window()) and tile(window('entertainment-second')),
+                'Stage and shelf follow the monitor’s new aspect ratio')
+        finally:
+            config.write_text(original_config)
+            cmd('hyprctl', 'reload')
+        wait_for(lambda: dimensions() == (1280, 800) and stage(window()) and tile(window('entertainment-second')),
+                 'Stage and shelf return to the original display ratio')
+        check_entertainment_drag(output, env, cmd, window, window_geometry, wait_for, switch_workspace,
+                                 regular_workspace, stage, tile, menu_shown, snapshot)
+        cmd('grim', str(output/'entertainment-live-windows.png'))
+        focus_view('stage')
+        wait_for(fullscreen_stage, 'Super+Up takes the current stage window fullscreen')
+        fullscreen_geometry = window_geometry('entertainment-probe')
+        switch_workspace(regular_workspace)
+        wait_for(lambda: workspace() == regular_workspace and bar_at_edge() and not shelf_mapped(),
+                 'A native workspace switch leaves Entertainment and restores the bar')
+        if window_geometry(regular_app) != regular_geometry or bar_geometry() != reservation:
+            raise RuntimeError('The regular tiled window or work area changed on leaving Entertainment')
+        cmd(*ipc, 'openDashboard')
+        wait_for(lambda: workspace() == 'entertainment' and window().get('fullscreen') == 2 and not shelf_mapped(),
+                 'The controller indicator returns to the fullscreen window in place')
+        if window_geometry('entertainment-probe') != fullscreen_geometry or bar_geometry() != reservation:
+            raise RuntimeError('The fullscreen window or work area changed on re-entering Entertainment')
         remote('home')
-        wait_for(visible, 'Dashboard returned above the second window')
+        wait_for(lambda: menu_shown() and stage(window()), 'Home returns from fullscreen to Apps')
+        remote('home')
+        wait_for(fullscreen_stage, 'Home toggles back to fullscreen without leaving the workspace')
+        remote('home')
+        wait_for(lambda: menu_shown() and stage(window()), 'Home returns to the same shelf selection')
+        cmd(*manager, 'fullscreen')
+        if window().get('fullscreen') != 2:
+            raise RuntimeError('The fullscreen request deferred the native mode switch')
+        focus_view('apps')
+        wait_for(lambda: menu_shown() and stage(window()), 'Quickly changing direction restores the shelf')
+        cmd('hyprctl', 'repl', 'hl.config({animations={enabled=false}})')
+        try:
+            cmd(*manager, 'fullscreen')
+            if window().get('fullscreen') != 2:
+                raise RuntimeError('Fullscreen was deferred with animations disabled')
+            cmd(*manager, 'restore')
+        finally:
+            cmd('hyprctl', 'reload')
+        wait_for(lambda: menu_shown() and stage(window()) and tile(window('entertainment-second')),
+                 'Disabling animations allows an immediate fullscreen round trip')
+        remote('down')
+        wait_for(lambda: shelf_contents('all', [second_address]), 'The catalog keeps live windows in their slots')
+        remote('nextPage')
+        wait_for(lambda: snapshot()['offset'] > 0 and window('entertainment-second')['at'][0] > 1280,
+                 'Moving to another shelf page parks the off-page window outside the output')
+        shelf_offset = snapshot()['offset']
+        window_positions = [window_geometry(app) for app in ('entertainment-probe', 'entertainment-second')]
+        switch_workspace('31')
+        wait_for(lambda: workspace() == '31' and bar_at_edge() and not shelf_mapped(),
+                 'The regular workspace switch leaves the shelf layout in place')
+        switch_workspace('name:entertainment')
+        wait_for(lambda: menu_shown() and snapshot()['offset'] == shelf_offset, 'Returning to Entertainment keeps the open shelf page')
+        if [window_geometry(app) for app in ('entertainment-probe', 'entertainment-second')] != window_positions:
+            raise RuntimeError('Switching workspaces retiled the Entertainment windows')
+        remote('up')
+        wait_for(lambda: snapshot()['offset'] == 0 and window('entertainment-second')['at'][0] == snapshot()['geometry']['tileX'],
+                 'Changing lists returns to page one and restores the live window')
+        remote('select')
+        wait_for(lambda: fullscreen_stage('entertainment-second'),
+                 'Selecting a running app swaps it onto the stage and takes it fullscreen')
+        if snapshot()['windows'][:2] != [window('entertainment-second')['address'], main_address]:
+            raise RuntimeError('The previous stage window did not take the selected shelf slot')
+        focus_view('apps')
+        wait_for(lambda: stage(window('entertainment-second')) and tile(window()) and menu_shown(),
+                 'Super+Down returns directly from fullscreen to the same shelf')
+        cmd('grim', str(output/'entertainment-swapped.png'))
         remote('close')
         remote('select')
-        wait_for(lambda: not window('entertainment-second'), 'Closing a card preserves the other window')
-        if not window(): raise RuntimeError('Closing a card also closed the other window')
+        wait_for(lambda: not window() and stage(window('entertainment-second')),
+                 'Closing a shelf window leaves the main window in place')
+        wait_for(lambda: shelf_contents('recent', ['entertainment-probe']), 'Closed stage apps appear in recents')
+        remote('exit')
+        wait_for(lambda: workspace() == '31' and not shelf_mapped(), 'Leaving Entertainment restores the previous workspace')
+        (output/'entertainment-bar-slots.json').write_text(json.dumps(bar_slots(), indent=2)+'\n')
+        wait_for(lambda: bar_at_edge() and indicator(True), 'An open Entertainment window adds a controller beside the workspace numbers')
+        icon = next(slot for slot in bar_slots() if slot['id'] == 'vantaglass.entertainment')
+        image = output/'entertainment-workspace-indicator.png'
+        # The layer can report its new position before Wayland presents the bar.
+        time.sleep(.4)
+        cmd('grim', str(image))
+        region = f'{icon["width"]}x{icon["height"]}+{icon["x"]}+{icon["y"]}'
+        coverage = cmd('magick', str(image), '-crop', region, '+repage', '-colorspace', 'gray',
+                       '-threshold', '55%', '-format', '%[fx:mean]', 'info:')
+        if float(coverage) < .005:
+            raise RuntimeError('The controller slot did not render a visible glyph')
+        cmd(*ipc, 'openDashboard')
+        wait_for(lambda: workspace() == 'entertainment' and menu_shown() and stage(window('entertainment-second')),
+                 'Opening Entertainment from the bar returns to the same live window')
+        cmd(*manager, 'close', second_address)
+        expected_order = ['entertainment-second', 'entertainment-probe']
+        wait_for(lambda: shelf_contents('recent', expected_order), 'Closed apps appear most recently used first')
+        history = home/'.local/state/vantaglass/entertainment-recents.json'
+        if json.loads(history.read_text())[:2] != expected_order:
+            raise RuntimeError('Recent apps were not saved in usage order')
+        guest_command(output, env, 'entertainment-shell-restart', 'omarchy', 'restart', 'shell')
+        wait_for(lambda: controller_live() and shelf_contents('recent', expected_order),
+                 'Open & recent restores its order after restarting the shell')
+        cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="1"})')
+        wait_for(lambda: not shelf_mapped() and bar_at_edge() and indicator(False),
+                 'Closing the last Entertainment window removes the controller')
     finally:
         if second.poll() is None:
             second.terminate()
         second.wait(timeout=5)
-    wait_for(first_card, 'Dashboard removes the closed window card and retains the other preview')
-    remote('up')
-    time.sleep(.4)
-    remote('close')
-    time.sleep(.25)
-    remote('select')
-    try:
-        wait_for(lambda: not window(), 'Closing a window from the card works')
-    except RuntimeError:
-        print(cmd('qs', 'ipc', '-p', str(dashboard), 'call', 'entertainment', 'status'), flush=True)
-        print(cmd('qs', 'log', '-p', str(dashboard), '-t', '30'), flush=True)
-        raise
-    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="1"})')
-    wait_for(lambda: not visible(), 'Ordinary workspace is unaffected')
-    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="31"})')
-    wait_for(visible, 'Returning to the entertainment workspace restores its dashboard')
-    cmd('wtype', '-k', 'F10')
-    wait_for(lambda: not visible(), 'F10 turns off the dashboard on this workspace')
-    cmd(*manager, 'enable')
-    wait_for(visible, 'Entertainment mode can be re-enabled')
-    cmd(*manager, 'stop')
-    wait_for(lambda: not visible(), 'Dashboard stopped before testing the boot hook')
-    cmd('omarchy', 'hook', 'post-boot')
-    wait_for(visible, 'Post-boot hook restores the saved entertainment workspace')
-    cmd('hyprctl', 'dispatch', 'hl.dsp.focus({workspace="1"})')
     return True
 
 
@@ -188,6 +460,7 @@ def installer_flow(output, env, config, baseline, preview=False):
     guest_command(output,env,'activation-environment','dbus-update-activation-environment','WAYLAND_DISPLAY','HYPRLAND_INSTANCE_SIGNATURE','XDG_CURRENT_DESKTOP','QT_QPA_PLATFORM')
     # The guest has no systemd PID 1. Adapt only journal transport; the stock
     # restart helper, supervised launcher and Quickshell still run unmodified.
+    (output/'restarted-shell.log').write_text('')
     journal_adapter=home/'.local/bin/systemd-cat';journal_adapter.parent.mkdir(parents=True,exist_ok=True)
     journal_adapter.write_text('#!/bin/bash\nwhile (( $# )) && [[ $1 != -- ]]; do shift; done\n[[ ${1:-} != -- ]] || shift\nexec "$@" >> /output/restarted-shell.log 2>&1\n')
     journal_adapter.chmod(0o755)
@@ -201,14 +474,16 @@ def installer_flow(output, env, config, baseline, preview=False):
     theme_loader='local path = os.getenv("HOME") .. "/.local/state/omarchy/current/theme/hyprland.lua"; local f = io.open(path); if f then f:close(); dofile(path) end\n'
     config.write_text(baseline+theme_loader)
     guest_command(output,env,'original-reload','hyprctl','reload')
-    essential={'omarchy.bar','omarchy.background','omarchy.menu','omarchy.clock','omarchy.notifications'}
+    essential={'omarchy.bar','omarchy.background','omarchy.menu','omarchy.clock','omarchy.notifications','omarchy.workspaces'}
     ids=set()
     for manifest in Path('/usr/share/omarchy/shell/plugins').rglob('*manifest.json'):
         data=json.loads(manifest.read_text())
         if data.get('id'):ids.add(data['id'])
-    shell_config={'version':1,'disabledPlugins':sorted(ids-essential),'idle':{'lock':0,'screensaver':0},'bar':{'background':'opaque','position':'top','layout':{'left':[{'id':'omarchy.menu'}],'center':[{'id':'omarchy.clock'}],'right':[],'centerBegin':[],'centerEnd':[],'tray':[]}}}
+    shell_config={'version':1,'disabledPlugins':sorted(ids-essential),'idle':{'lock':0,'screensaver':0},'bar':{'background':'opaque','position':'top','layout':{'left':[{'id':'omarchy.menu'},{'id':'omarchy.workspaces'}],'center':[{'id':'omarchy.clock'}],'right':[],'centerBegin':[],'centerEnd':[],'tray':[]}}}
     shell_file=settings/'shell.json';shell_file.write_text(json.dumps(shell_config))
     shell_log=(output/'shell.log').open('w')
+    if not preview:
+        add_entertainment_fixture(home)
     shell=subprocess.Popen(['quickshell','--no-color','--path','/usr/share/omarchy/shell'],env=env,stdout=shell_log,stderr=shell_log)
     terminal=None
     terminal_log=None
@@ -233,6 +508,7 @@ def installer_flow(output, env, config, baseline, preview=False):
         if manifest['previous_theme']!='vm-original' or not Path(manifest['backup']).is_file():raise RuntimeError('Original guest snapshot is missing')
         expected_layout=json.loads(json.dumps(shell_config['bar']['layout']))
         expected_layout['left'][0]['id']='vantaglass.menu'
+        expected_layout['left'].append({'id':'vantaglass.entertainment'})
         expected_layout['center'][0]['id']='vantaglass.clock'
         if json.loads(shell_file.read_text())['bar']['layout']!=shell_config['bar']['layout']:raise RuntimeError('Inactive installation changed the original layout')
         guest_command(output,env,'reinstall',*manager,'install')
@@ -380,7 +656,7 @@ def installer_flow(output, env, config, baseline, preview=False):
         (update_fixtures/'offline').unlink()
         guest_command(output,dict(env,OMARCHY_THEME_WAIT='1'),'update-back','omarchy','theme','set','vantaglass')
         print('Verified automatic release upgrades, other-theme preservation and offline hook continuation',flush=True)
-        entertainment_checked = check_entertainment(output, env, home)
+        entertainment_checked = check_entertainment(output, env, home, config)
         later=json.loads(shell_file.read_text());later['idle']['lock']=900;later['bar']['layout']['left'].append({'id':'omarchy.spacer','width':11});shell_file.write_text(json.dumps(later))
         config.write_text(config.read_text()+'-- Later guest user edit\n')
         guest_command(output,env,'restore',*manager,'restore')
@@ -392,9 +668,10 @@ def installer_flow(output, env, config, baseline, preview=False):
         if json.loads(shell_file.read_text())['bar']['layout']!=expected_restored:raise RuntimeError('Restore changed the original layout or a later widget edit')
         guest_command(output,env,'uninstall',*manager,'uninstall')
         if (state/'entertainment.json').exists(): raise RuntimeError('Uninstall retained active entertainment workspace settings')
+        if (state/'entertainment-recents.json').exists(): raise RuntimeError('Uninstall retained active entertainment recents')
         layers = json.loads(guest_command(output,env,'final-layers','hyprctl','-j','layers'))
         if 'vantaglass-entertainment' in json.dumps(layers): raise RuntimeError('Uninstall left an entertainment layer')
-        for path in [state/'installation.json',state/'preferences.json',state/'original-shell.json',settings/'plugins/vantaglass.style',settings/'plugins/vantaglass.menu',settings/'plugins/vantaglass.audio',settings/'plugins/vantaglass.monitor',settings/'plugins/vantaglass.network',settings/'plugins/vantaglass.bluetooth',settings/'plugins/vantaglass.power',settings/'plugins/vantaglass.clock',home/'.local/share/vantaglass/runtime',home/'.local/bin/vantaglass']:
+        for path in [state/'installation.json',state/'preferences.json',state/'original-shell.json',*settings.glob('plugins/vantaglass.*'),home/'.local/share/vantaglass/runtime',home/'.local/bin/vantaglass']:
             if path.exists():raise RuntimeError('Uninstall retained an active owned file: '+str(path))
         if guest_command(output,env,'final-configerrors','hyprctl','configerrors').strip():raise RuntimeError('Final compositor configuration has errors')
         shell_log.flush()
@@ -494,6 +771,10 @@ export VANTAGLASS_VM=1
 /usr/lib/systemd/systemd-udevd --daemon
 /usr/bin/udevadm trigger --action=add
 /usr/bin/udevadm settle --timeout=5
+if [ "VM_MODE" = "--integration" ]; then
+  modprobe uinput
+  chmod 0666 /dev/uinput
+fi
 /usr/bin/seatd -g users >/output/seatd.log 2>&1 &
 sleep 1
 export LIBSEAT_BACKEND=seatd SEATD_SOCK=/run/seatd.sock
@@ -522,6 +803,13 @@ def inside(integration=False, preview=False):
     # The minimal guest omits Omarchy's defaults; supply its terminal tagging
     # and opacity rules so the theme is checked against the normal baseline.
     baseline+='hl.window_rule({match={class="(foot|preview-.*|vantaglass-validation)"},tag="+terminal",opacity="0.985 0.96"})\n'
+    baseline+='''dofile("/usr/share/omarchy/default/hypr/bootstrap.lua")
+require("default.hypr.helpers")
+hl.config({ general = { resize_on_border = true } })
+hl.device({ name = "vantaglass-test-mouse", accel_profile = "flat", sensitivity = 0 })
+o.bind("SUPER + mouse:272", "Move window", hl.dsp.window.drag(), { mouse = true })
+o.bind("SUPER + mouse:273", "Resize window", hl.dsp.window.resize(), { mouse = true })
+'''
     config.write_text(baseline)
     log=(output/'hyprland.log').open('w')
     process=subprocess.Popen(['/usr/bin/Hyprland','--config',str(config)],stdout=log,stderr=log)

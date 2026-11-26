@@ -22,6 +22,9 @@ class InstallationTests(unittest.TestCase):
         self.home=Path(self.tmp.name)
         self.patches=[patch.object(manage,'HOME',self.home),patch.object(manage,'CONFIG',self.home/'.config'),patch.object(manage,'STATE',self.home/'.local/state/vantaglass'),patch.object(manage,'run'),patch.object(manage,'compatibility_issues',return_value=[]),patch.object(manage,'preflight'),patch.object(manage.subprocess,'run'),patch.object(manage.subprocess,'check_output',return_value='')]
         for item in self.patches:item.start()
+        bar_files = patch.object(manage, 'workspace_bar_files', return_value={'Bar.qml': b'import QtQuick\nItem {}\n', 'BarModel.js': b''})
+        bar_files.start()
+        self.patches.append(bar_files)
         manage.subprocess.run.return_value.returncode=0
         manage.subprocess.run.return_value.stdout='ok'
         self.shell=self.home/'.config/omarchy/shell.json'
@@ -60,7 +63,7 @@ class InstallationTests(unittest.TestCase):
         (self.home/'.local/state/omarchy/current/theme.name').write_text('vantaglass')
         manage.install()
         config=json.loads(self.shell.read_text())
-        self.assertEqual(config['bar']['layout']['left'],[{'id':'omarchy.workspaces'}])
+        self.assertEqual(config['bar']['layout']['left'],[{'id':'omarchy.workspaces'},{'id':'vantaglass.entertainment'}])
         self.assertIn({'id':manage.MENU},config['plugins'])
 
     def test_string_form_menu_entry_retains_its_bar_placement(self):

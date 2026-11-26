@@ -24,22 +24,31 @@ omarchy theme set vantaglass
 
 Switching to another theme restores the native panels. Switching back enables Vantaglass again.
 
-## Entertainment mode
+## Entertainment
 
-On the workspace you want to use, open **Appearance → Entertainment Mode**. The dashboard shows installed apps and previews of windows on that workspace. Selecting an app opens it. Selecting a running window makes it fullscreen.
+Press **Super+E** or **Home** on your controller or configured TV remote to enter the dedicated Entertainment workspace. **Super+Up** takes the stage app fullscreen and **Super+Down** brings back the shelf. **Leave** returns to your previous workspace.
+
+The shelf shows live Hyprland windows beside app icons. Selecting a window opens it fullscreen and moves the previous stage window into the selected slot. Stage and shelf windows follow the active display's aspect ratio.
+
+Drag a running app from the shelf onto the stage to swap the two windows while keeping the shelf open. Dropping outside the stage leaves both windows in place.
+
+On regular workspaces, a controller icon appears beside the workspace numbers while Entertainment has open windows. Click it to return to Entertainment. The top bar hides on the display showing Entertainment.
+
+**Up** and **Down** switch between **Open & recent** and **All apps**. Both start with open Entertainment windows. The default list follows with apps you've used on stage, most recent first. **All apps** follows with the launcher catalog in alphabetical order.
 
 | Action | Keyboard | Controller | TV remote |
 | --- | --- | --- | --- |
-| Move | Arrow keys | D-pad or left stick | Direction buttons |
-| Open or resume | Enter | A | OK |
-| Close a window | Delete, then Enter | X, then A | Menu, then OK |
-| Go back | Esc | B | Back |
-| Exit entertainment mode | F10 | Start | Exit |
-| Return from fullscreen | `vantaglass entertainment show` | Guide | Home with the setup below |
+| Switch between Stage and Apps | Super+Up or Super+Down | Guide | Home |
+| Take the current app fullscreen | Esc | B | Back |
+| Switch app lists | Up or Down | D-pad Up or Down | Up or Down |
+| Browse or change page | Left or Right, Page Up or Down | D-pad Left or Right | Left or Right |
+| Open or swap windows | Enter | A | OK |
+| Close a shelf window | Delete, then Enter | X, then A | Menu, then OK |
+| Leave Entertainment while browsing | F10 | Start | Exit |
 
-Controllers use SDL2 (`sdl2-compat` on Arch). Remotes that send keyboard events work while the dashboard has focus. For a remote that Linux exposes under `/dev/input/by-id/`, set `VANTAGLASS_REMOTE_DEVICE` in your session environment to its event device path to also use Home from fullscreen. The session user needs read access to that device. HDMI-CEC remotes need a bridge that sends Linux input events.
+**Super+E** or **Home** toggles between fullscreen and the shelf.
 
-You can also toggle the current workspace with `~/.local/bin/vantaglass entertainment toggle`. The workspace setting survives a reboot.
+Controllers use SDL2 (`sdl2-compat` on Arch). To use a TV remote's Home button anywhere, set `VANTAGLASS_REMOTE_DEVICE` in your session environment to its Linux event device under `/dev/input/by-id/`. The session user needs read access to that device. HDMI-CEC remotes need a bridge that sends Linux input events.
 
 ## Optional overrides
 
